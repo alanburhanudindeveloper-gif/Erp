@@ -22,6 +22,11 @@ import {
   TestingScenario,
   MrpItemRequirement,
   OutputLogEntry,
+  Supplier,
+  PurchaseRequisition,
+  PurchaseOrder,
+  GoodsReceiptNote,
+  StockBucket,
 } from '../../types';
 import {
   INITIAL_PRODUCTS,
@@ -40,10 +45,14 @@ import {
   INITIAL_COST_VARIANCES,
   INITIAL_AUDIT_LOGS,
   INITIAL_TESTING_SCENARIOS,
+  INITIAL_SUPPLIERS,
+  INITIAL_PURCHASE_REQUISITIONS,
+  INITIAL_PURCHASE_ORDERS,
+  INITIAL_GOODS_RECEIPTS,
 } from '../mockData';
 import { runMRPCalculation } from '../calculations/mrpCalculator';
 
-const STORAGE_KEY = 'kranex_mfg_erp_pdf_spec_v2';
+const STORAGE_KEY = 'kranex_mfg_erp_pdf_spec_v3';
 
 export interface ErpState {
   products: Product[];
@@ -62,9 +71,13 @@ export interface ErpState {
   costVariances: CostVarianceRecord[];
   auditLogs: AuditLogEntry[];
   testingScenarios: TestingScenario[];
+  suppliers: Supplier[];
+  purchaseRequisitions: PurchaseRequisition[];
+  purchaseOrders: PurchaseOrder[];
+  goodsReceiptNotes: GoodsReceiptNote[];
   selectedPlant: string;
   activeOrderFilter: string;
-  currentUser: { name: string; role: string };
+  currentUser: { name: string; role: string; id: string };
   notifications: { id: string; type: 'info' | 'success' | 'warning' | 'error'; message: string; timestamp: string }[];
 }
 
@@ -75,8 +88,13 @@ const getInitialState = (): ErpState => {
       const parsed = JSON.parse(saved);
       return {
         ...parsed,
+        suppliers: parsed.suppliers?.length ? parsed.suppliers : INITIAL_SUPPLIERS,
+        purchaseRequisitions: parsed.purchaseRequisitions?.length ? parsed.purchaseRequisitions : INITIAL_PURCHASE_REQUISITIONS,
+        purchaseOrders: parsed.purchaseOrders?.length ? parsed.purchaseOrders : INITIAL_PURCHASE_ORDERS,
+        goodsReceiptNotes: parsed.goodsReceiptNotes?.length ? parsed.goodsReceiptNotes : INITIAL_GOODS_RECEIPTS,
         selectedPlant: 'PLANT-01',
         activeOrderFilter: 'ALL',
+        currentUser: parsed.currentUser || { id: 'usr-001', name: 'Dewi Lestari', role: 'PPIC Supervisor' },
       };
     }
   } catch {
@@ -99,9 +117,13 @@ const getInitialState = (): ErpState => {
     costVariances: INITIAL_COST_VARIANCES,
     auditLogs: INITIAL_AUDIT_LOGS,
     testingScenarios: INITIAL_TESTING_SCENARIOS,
+    suppliers: INITIAL_SUPPLIERS,
+    purchaseRequisitions: INITIAL_PURCHASE_REQUISITIONS,
+    purchaseOrders: INITIAL_PURCHASE_ORDERS,
+    goodsReceiptNotes: INITIAL_GOODS_RECEIPTS,
     selectedPlant: 'PLANT-01',
     activeOrderFilter: 'ALL',
-    currentUser: { name: 'Dewi Lestari', role: 'PPIC Supervisor' },
+    currentUser: { id: 'usr-001', name: 'Dewi Lestari', role: 'PPIC Supervisor' },
     notifications: [
       {
         id: 'notif-p92',
@@ -756,6 +778,639 @@ export function useErpStore() {
     addNotification('success', `Testing Scenario ${scenarioId} executed successfully: Expected domain result validated.`);
   }, [addNotification]);
 
+  // 12. Create Purchase Requisition (UC-PRC-001 & BR-GLOBAL-002)
+  const createPurchaseRequisition = useCallback(
+    (data: {
+      requesterName: string;
+      department: string;
+      requiredDate: string;
+      reason: string;
+      items: {
+        productId: string;
+        quantity: number;
+        estimatedPrice: number;
+        supplierPreferred?: string;
+      }[];
+    }) => {
+      const prSeq = (state.purchaseRequisitions.length + 1).toString().padStart(6, '0');
+      const prNumber = `PR-2026-${prSeq}`;
+      const now = new Date();
+      const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+      let totalAmount = 0;
+      const prItems = data.items.map((item, idx) => {
+        const prod = state.products.find((p) => p.id === item.productId);
+        const cost = item.quantity * item.estimatedPrice;
+        totalAmount += cost;
+        return {
+          id: `pri-${Date.now()}-${idx}`,
+          productId: item.productId,
+          sku: prod ? prod.sku : 'SKU-UNKNOWN',
+          name: prod ? prod.name : 'Unknown Material',
+          quantity: item.quantity,
+          uom: prod ? prod.baseUom : 'PCS',
+          estimatedPrice: item.estimatedPrice,
+          totalCost: cost,
+          supplierPreferred: item.supplierPreferred,
+        };
+      });
+
+      // Tiered Approval Engine:
+      // < 10M => Level 1 (Dept Supervisor)
+      // 10M - 100M => Level 2 (Plant Manager)
+      // > 100M => Level 3 (Operations Director)
+      let approvalLevel: 1 | 2 | 3 = 1;
+      if (totalAmount > 100000000) {
+        approvalLevel = 3;
+      } else if (totalAmount >= 10000000) {
+        approvalLevel = 2;
+      }
+
+      const newPR: PurchaseRequisition = {
+        id: `pr-${Date.now()}`,
+        prNumber,
+        requesterId: state.currentUser.id || 'usr-001',
+        requesterName: data.requesterName || state.currentUser.name,
+        department: data.department || 'Operations',
+        requiredDate: data.requiredDate,
+        reason: data.reason,
+        plantId: state.selectedPlant,
+        status: 'PENDING_APPROVAL',
+        totalAmount,
+        approvalLevelRequired: approvalLevel,
+        items: prItems,
+        createdAt: timeStr,
+      };
+
+      const audit: AuditLogEntry = {
+        id: `aud-${Date.now()}`,
+        documentId: prNumber,
+        documentType: 'PURCHASE_REQUISITION',
+        action: 'CREATE_PR',
+        actor: newPR.requesterName,
+        role: state.currentUser.role,
+        timestamp: timeStr,
+        newStatus: 'PENDING_APPROVAL',
+        decision: 'EXECUTED',
+        reason: `Created PR ${prNumber} with Total Rp ${totalAmount.toLocaleString('id-ID')}. Assigned to Approval Level ${approvalLevel}.`,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        purchaseRequisitions: [newPR, ...prev.purchaseRequisitions],
+        auditLogs: [audit, ...prev.auditLogs],
+      }));
+
+      addNotification('success', `Created PR ${prNumber} (Total: Rp ${totalAmount.toLocaleString('id-ID')}, Level ${approvalLevel} Approval).`);
+      return newPR;
+    },
+    [state.purchaseRequisitions.length, state.products, state.currentUser, state.selectedPlant, addNotification]
+  );
+
+  // 13. Approve Purchase Requisition (UC-PRC-002 & BR-PRC-002 SoD Enforcement)
+  const approvePurchaseRequisition = useCallback(
+    (prId: string, approverName?: string, approverRole?: string): { success: boolean; error?: string } => {
+      const pr = state.purchaseRequisitions.find((p) => p.id === prId);
+      if (!pr) return { success: false, error: 'PR not found' };
+
+      const activeUser = approverName || state.currentUser.name;
+      const activeRole = approverRole || state.currentUser.role;
+
+      // BR-PRC-002: Segregation of Duties (SoD) - Requester CANNOT self-approve
+      if (pr.requesterName.trim().toLowerCase() === activeUser.trim().toLowerCase()) {
+        const errorMsg = `Segregation of Duties Violation (BR-PRC-002): Requester (${pr.requesterName}) is not permitted to self-approve their own Purchase Requisition. Approval must be performed by an independent authorized manager.`;
+        addNotification('error', errorMsg);
+        return { success: false, error: errorMsg };
+      }
+
+      const now = new Date();
+      const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+      const audit: AuditLogEntry = {
+        id: `aud-${Date.now()}`,
+        documentId: pr.prNumber,
+        documentType: 'PURCHASE_REQUISITION',
+        action: 'APPROVE_PR',
+        actor: activeUser,
+        role: activeRole,
+        timestamp: timeStr,
+        oldStatus: pr.status,
+        newStatus: 'APPROVED',
+        decision: 'APPROVED',
+        reason: `Approved Level ${pr.approvalLevelRequired} Purchase Requisition after verifying budget and necessity.`,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        purchaseRequisitions: prev.purchaseRequisitions.map((p) =>
+          p.id === prId
+            ? {
+                ...p,
+                status: 'APPROVED' as const,
+                approvedBy: `${activeUser} (${activeRole})`,
+                approvedAt: timeStr,
+              }
+            : p
+        ),
+        auditLogs: [audit, ...prev.auditLogs],
+      }));
+
+      addNotification('success', `Purchase Requisition ${pr.prNumber} has been APPROVED by ${activeUser}. Ready for PO creation.`);
+      return { success: true };
+    },
+    [state.purchaseRequisitions, state.currentUser, addNotification]
+  );
+
+  // 14. Reject Purchase Requisition (UC-PRC-002)
+  const rejectPurchaseRequisition = useCallback(
+    (prId: string, reason: string): { success: boolean; error?: string } => {
+      if (!reason || reason.trim().length === 0) {
+        addNotification('error', 'Rejection rejected: BR-PRC-002 mandates an explicit explanation reason for rejecting a PR.');
+        return { success: false, error: 'Reason mandatory' };
+      }
+
+      const pr = state.purchaseRequisitions.find((p) => p.id === prId);
+      if (!pr) return { success: false, error: 'PR not found' };
+
+      const now = new Date();
+      const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+      const audit: AuditLogEntry = {
+        id: `aud-${Date.now()}`,
+        documentId: pr.prNumber,
+        documentType: 'PURCHASE_REQUISITION',
+        action: 'REJECT_PR',
+        actor: state.currentUser.name,
+        role: state.currentUser.role,
+        timestamp: timeStr,
+        oldStatus: pr.status,
+        newStatus: 'REJECTED',
+        decision: 'REJECTED',
+        reason,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        purchaseRequisitions: prev.purchaseRequisitions.map((p) =>
+          p.id === prId
+            ? {
+                ...p,
+                status: 'REJECTED' as const,
+                rejectionReason: reason,
+              }
+            : p
+        ),
+        auditLogs: [audit, ...prev.auditLogs],
+      }));
+
+      addNotification('warning', `PR ${pr.prNumber} REJECTED. Reason recorded: ${reason}`);
+      return { success: true };
+    },
+    [state.purchaseRequisitions, state.currentUser, addNotification]
+  );
+
+  // 15. Create Purchase Order (UC-PRC-003)
+  const createPurchaseOrder = useCallback(
+    (data: {
+      prId?: string;
+      supplierId: string;
+      expectedDeliveryDate: string;
+      paymentTerms: string;
+      destinationWarehouse: string;
+      items: {
+        productId: string;
+        orderedQty: number;
+        unitPrice: number;
+        qcRequired: boolean;
+      }[];
+    }) => {
+      const poSeq = (state.purchaseOrders.length + 1).toString().padStart(6, '0');
+      const poNumber = `PO-2026-${poSeq}`;
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      const timeStr = `${today} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+      const supplier = state.suppliers.find((s) => s.id === data.supplierId) || state.suppliers[0];
+      const prRef = data.prId ? state.purchaseRequisitions.find((p) => p.id === data.prId) : undefined;
+
+      let totalAmount = 0;
+      const poItems = data.items.map((item, idx) => {
+        const prod = state.products.find((p) => p.id === item.productId);
+        const lineTotal = item.orderedQty * item.unitPrice;
+        totalAmount += lineTotal;
+        return {
+          id: `poi-${Date.now()}-${idx}`,
+          productId: item.productId,
+          sku: prod ? prod.sku : 'SKU-UNKNOWN',
+          name: prod ? prod.name : 'Component Item',
+          orderedQty: item.orderedQty,
+          receivedQty: 0,
+          unitPrice: item.unitPrice,
+          totalAmount: lineTotal,
+          uom: prod ? prod.baseUom : 'PCS',
+          qcRequired: item.qcRequired,
+        };
+      });
+
+      const newPO: PurchaseOrder = {
+        id: `po-${Date.now()}`,
+        poNumber,
+        prReference: prRef?.prNumber,
+        prId: data.prId,
+        supplierId: supplier.id,
+        supplierName: supplier.name,
+        orderDate: today,
+        expectedDeliveryDate: data.expectedDeliveryDate,
+        paymentTerms: data.paymentTerms || supplier.paymentTerms,
+        destinationWarehouse: data.destinationWarehouse || 'PLANT01-RM-WH-BAY-01',
+        status: 'APPROVED',
+        items: poItems,
+        totalAmount,
+        createdBy: state.currentUser.name,
+        approvedBy: 'Bambang Sutrisno (Procurement Manager)',
+        approvedAt: timeStr,
+        createdAt: timeStr,
+      };
+
+      const audit: AuditLogEntry = {
+        id: `aud-${Date.now()}`,
+        documentId: poNumber,
+        documentType: 'PURCHASE_ORDER',
+        action: 'CREATE_PO',
+        actor: state.currentUser.name,
+        role: state.currentUser.role,
+        timestamp: timeStr,
+        newStatus: 'APPROVED',
+        decision: 'EXECUTED',
+        reason: `Created PO ${poNumber} for ${supplier.name} totaling Rp ${totalAmount.toLocaleString('id-ID')}.`,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        purchaseOrders: [newPO, ...prev.purchaseOrders],
+        purchaseRequisitions: data.prId
+          ? prev.purchaseRequisitions.map((p) => (p.id === data.prId ? { ...p, status: 'PO_GENERATED' as const } : p))
+          : prev.purchaseRequisitions,
+        auditLogs: [audit, ...prev.auditLogs],
+      }));
+
+      addNotification('success', `Issued Purchase Order ${poNumber} to ${supplier.name}. Status: APPROVED.`);
+      return newPO;
+    },
+    [state.purchaseOrders.length, state.suppliers, state.purchaseRequisitions, state.products, state.currentUser, addNotification]
+  );
+
+  // 15.5 Approve Purchase Order (UC-PRC-003)
+  const approvePurchaseOrder = useCallback(
+    (poId: string) => {
+      const po = state.purchaseOrders.find((p) => p.id === poId);
+      if (!po) return;
+
+      const now = new Date();
+      const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+      setState((prev) => ({
+        ...prev,
+        purchaseOrders: prev.purchaseOrders.map((p) =>
+          p.id === poId
+            ? {
+                ...p,
+                status: 'APPROVED' as const,
+                approvedBy: `${prev.currentUser.name} (${prev.currentUser.role})`,
+                approvedAt: timeStr,
+              }
+            : p
+        ),
+      }));
+
+      addNotification('success', `Purchase Order ${po.poNumber} has been APPROVED.`);
+    },
+    [state.purchaseOrders, addNotification]
+  );
+
+  // 16. Post Goods Receipt Note (UC-PRC-004 & UC-INV-001 Auto-Routing to Hold)
+  const postGoodsReceipt = useCallback(
+    (
+      poId: string,
+      receiptLines: {
+        poItemId: string;
+        receivedQty: number;
+        supplierLot: string;
+        warehouseLoc: string;
+        incomingQcRequired: boolean;
+      }[],
+      notes?: string
+    ) => {
+      const po = state.purchaseOrders.find((p) => p.id === poId);
+      if (!po) return { success: false, error: 'PO not found' };
+
+      const grnSeq = (state.goodsReceiptNotes.length + 1).toString().padStart(6, '0');
+      const grnNumber = `GRN-2026-${grnSeq}`;
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      const timeStr = `${today} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+      const newMovements: StockMovement[] = [];
+      const newInspections: QualityInspection[] = [];
+      const updatedProducts = [...state.products];
+      const grnItems: any[] = [];
+      let anyQcRequired = false;
+
+      const updatedPoItems = po.items.map((item) => {
+        const line = receiptLines.find((r) => r.poItemId === item.id);
+        if (!line || line.receivedQty <= 0) return item;
+
+        const newReceivedQty = item.receivedQty + line.receivedQty;
+        const bucket: StockBucket = line.incomingQcRequired ? 'HOLD' : 'AVAILABLE';
+        if (line.incomingQcRequired) anyQcRequired = true;
+
+        const inspectionId = line.incomingQcRequired ? `qc-${Date.now()}-${item.id}` : undefined;
+
+        // 1. Immutable Stock Movement
+        newMovements.push({
+          id: `mov-${Date.now()}-${item.id}`,
+          movementNo: `MATDOC-GRN-${grnSeq}-${item.sku.replace(/\s+/g, '')}`,
+          timestamp: timeStr,
+          productId: item.productId,
+          sku: item.sku,
+          quantity: line.receivedQty,
+          uom: item.uom,
+          fromLocation: 'SUPPLIER-INBOUND-DOCK',
+          toLocation: line.warehouseLoc || (line.incomingQcRequired ? 'PLANT01-RM-WH-HOLD' : 'PLANT01-RM-WH-BAY-01'),
+          lotNumber: line.supplierLot || `LOT-SUP-${Date.now().toString().slice(-4)}`,
+          sourceDocument: grnNumber,
+          movementType: 'GR_PURCHASE',
+          stockBucket: bucket,
+        });
+
+        // 2. Auto-generate Quality Inspection if QC required (UC-PRC-004 & BR-INV-001)
+        if (line.incomingQcRequired) {
+          newInspections.push({
+            id: inspectionId!,
+            inspectionNo: `QC-2026-0${420 + state.inspections.length}`,
+            sourceType: 'RECEIVING',
+            sourceRef: grnNumber,
+            productId: item.productId,
+            sku: item.sku,
+            productName: item.name,
+            lotNumber: line.supplierLot,
+            operationName: 'Incoming Raw Material Inspection (IQC Dock)',
+            sampleSize: Math.min(50, line.receivedQty),
+            defectsCount: 0,
+            characteristic: 'Material Mill Certificate & Dimensional Tolerances',
+            specification: 'ASTM / DIN Industrial Standard Compliance',
+            result: 'PASS',
+            disposition: 'HOLD',
+            inspector: 'QC Receiving Specialist (Pending Release)',
+            timestamp: timeStr,
+            notes: `Material placed on HOLD pending official IQC sign-off. Supplier lot: ${line.supplierLot}.`,
+          });
+        }
+
+        // 3. Update Product On-Hand Stock
+        const prodIndex = updatedProducts.findIndex((p) => p.id === item.productId);
+        if (prodIndex >= 0) {
+          updatedProducts[prodIndex] = {
+            ...updatedProducts[prodIndex],
+            currentStock: updatedProducts[prodIndex].currentStock + line.receivedQty,
+          };
+        }
+
+        grnItems.push({
+          id: `gri-${Date.now()}-${item.id}`,
+          productId: item.productId,
+          sku: item.sku,
+          name: item.name,
+          receivedQty: line.receivedQty,
+          uom: item.uom,
+          supplierLot: line.supplierLot,
+          qcRequired: line.incomingQcRequired,
+          stockBucket: bucket,
+          targetLocation: line.warehouseLoc,
+          inspectionId,
+        });
+
+        return {
+          ...item,
+          receivedQty: newReceivedQty,
+        };
+      });
+
+      const isFullyReceived = updatedPoItems.every((it) => it.receivedQty >= it.orderedQty);
+
+      const newGrn: GoodsReceiptNote = {
+        id: `grn-${Date.now()}`,
+        grnNumber,
+        poId: po.id,
+        poNumber: po.poNumber,
+        supplierName: po.supplierName,
+        receivedDate: timeStr,
+        receivedBy: state.currentUser.name,
+        items: grnItems,
+        notes: notes || 'Supplier delivery accepted at inbound dock.',
+        stockBucketSummary: anyQcRequired
+          ? 'Quarantine: Material routed to HOLD bucket (IQC Inspection required).'
+          : 'Unrestricted: Stock placed directly into AVAILABLE inventory.',
+      };
+
+      const audit: AuditLogEntry = {
+        id: `aud-${Date.now()}`,
+        documentId: grnNumber,
+        documentType: 'GOODS_RECEIPT',
+        action: 'POST_GRN',
+        actor: state.currentUser.name,
+        role: state.currentUser.role,
+        timestamp: timeStr,
+        decision: 'EXECUTED',
+        reason: `Posted receipt ${grnNumber} for ${po.poNumber}. Stock bucket disposition: ${newGrn.stockBucketSummary}`,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        goodsReceiptNotes: [newGrn, ...prev.goodsReceiptNotes],
+        stockMovements: [...newMovements, ...prev.stockMovements],
+        inspections: [...newInspections, ...prev.inspections],
+        products: updatedProducts,
+        purchaseOrders: prev.purchaseOrders.map((p) =>
+          p.id === poId
+            ? {
+                ...p,
+                items: updatedPoItems,
+                status: isFullyReceived ? ('FULLY_RECEIVED' as const) : ('PARTIALLY_RECEIVED' as const),
+              }
+            : p
+        ),
+        auditLogs: [audit, ...prev.auditLogs],
+      }));
+
+      addNotification(
+        anyQcRequired ? 'warning' : 'success',
+        `Posted GRN ${grnNumber}. ${anyQcRequired ? 'Stock placed on HOLD (IQC task created).' : 'Stock AVAILABLE for issue.'}`
+      );
+      return { success: true, grn: newGrn };
+    },
+    [state.purchaseOrders, state.goodsReceiptNotes.length, state.products, state.currentUser, state.inspections.length, addNotification]
+  );
+
+  // 17. Release QC Inspection (UC-QA-001..003: Moves stock from HOLD to AVAILABLE or creates NCR)
+  const releaseQcInspection = useCallback(
+    (inspectionId: string, decision: 'PASS' | 'FAIL', disposition: 'UNRESTRICTED' | 'HOLD' | 'REJECT' | 'REWORK', notes: string) => {
+      const qc = state.inspections.find((i) => i.id === inspectionId);
+      if (!qc) return;
+
+      const now = new Date();
+      const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+      const newMovements: StockMovement[] = [];
+      const newNcrs: NonConformanceReport[] = [];
+
+      if (decision === 'PASS' && disposition === 'UNRESTRICTED') {
+        // Transfer stock from HOLD to AVAILABLE
+        newMovements.push({
+          id: `mov-${Date.now()}-rel`,
+          movementNo: `MATDOC-REL-${Date.now().toString().slice(-5)}`,
+          timestamp: timeStr,
+          productId: qc.productId,
+          sku: qc.sku,
+          quantity: qc.sampleSize * 20, // batch release
+          uom: 'KG',
+          fromLocation: 'PLANT01-RM-WH-HOLD',
+          toLocation: 'PLANT01-RM-WH-AVAILABLE',
+          lotNumber: qc.lotNumber,
+          sourceDocument: qc.inspectionNo,
+          movementType: 'TRANSFER',
+          stockBucket: 'AVAILABLE',
+        });
+      } else if (decision === 'FAIL') {
+        // Spawn Non-Conformance Report (NCR)
+        newNcrs.push({
+          id: `ncr-${Date.now()}`,
+          ncrNo: `NCR-2026-0${19 + state.ncrs.length}`,
+          orderNumber: qc.sourceRef,
+          lotNumber: qc.lotNumber,
+          productSku: qc.sku,
+          defectDescription: notes || 'Material failed IQC metallurgical specification test.',
+          rootCause: 'Supplier alloy deviation outside acceptable tolerance range.',
+          quantityAffected: qc.sampleSize * 10,
+          disposition: disposition === 'REWORK' ? 'REWORK' : 'SCRAP',
+          status: 'OPEN',
+          createdAt: timeStr,
+        });
+      }
+
+      const audit: AuditLogEntry = {
+        id: `aud-${Date.now()}`,
+        documentId: qc.inspectionNo,
+        documentType: 'QUALITY_INSPECTION',
+        action: 'RELEASE_QC_DISPOSITION',
+        actor: state.currentUser.name,
+        role: 'Quality Lead',
+        timestamp: timeStr,
+        oldStatus: qc.disposition,
+        newStatus: disposition,
+        decision: decision === 'PASS' ? 'APPROVED' : 'FLAGGED',
+        reason: notes || `QC evaluation complete: Result ${decision}, Disposition ${disposition}.`,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        inspections: prev.inspections.map((i) =>
+          i.id === inspectionId
+            ? {
+                ...i,
+                result: decision,
+                disposition,
+                inspector: prev.currentUser.name,
+                notes: `${i.notes || ''} [Decision: ${decision}/${disposition}] ${notes}`,
+              }
+            : i
+        ),
+        stockMovements: [...newMovements, ...prev.stockMovements],
+        ncrs: [...newNcrs, ...prev.ncrs],
+        auditLogs: [audit, ...prev.auditLogs],
+      }));
+
+      addNotification(
+        decision === 'PASS' ? 'success' : 'error',
+        `QC Inspection ${qc.inspectionNo} updated: ${decision} (${disposition}). Stock ledger updated.`
+      );
+    },
+    [state.inspections, state.ncrs.length, state.currentUser, addNotification]
+  );
+
+  // 18. Issue Material to Production Order (UC-INV-003 & BR-INV-003 Prevention of Hold Stock Issue)
+  const issueMaterialToProduction = useCallback(
+    (orderId: string, componentSku: string, lotNumber: string, quantity: number, isHoldOverride?: boolean) => {
+      // Find if lot has stock movements in HOLD
+      const isLotOnHold = state.stockMovements.some(
+        (m) => m.lotNumber === lotNumber && m.stockBucket === 'HOLD'
+      );
+
+      if (isLotOnHold && !isHoldOverride) {
+        const errorMsg = `Action Blocked (UC-INV-003 / BR-INV-003): Material ${componentSku} from Lot ${lotNumber} is currently in HOLD / QUARANTINE status. Material under QC hold is strictly prohibited from being issued to shop floor production. Complete QC release inspection first.`;
+        addNotification('error', errorMsg);
+        return { success: false, error: errorMsg };
+      }
+
+      const order = state.productionOrders.find((o) => o.id === orderId);
+      if (!order) return { success: false, error: 'Order not found' };
+
+      const now = new Date();
+      const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+      // Post GI_PRODUCTION stock movement
+      const movement: StockMovement = {
+        id: `mov-${Date.now()}-gi`,
+        movementNo: `MATDOC-GI-${Date.now().toString().slice(-5)}`,
+        timestamp: timeStr,
+        productId: 'raw-001',
+        sku: componentSku,
+        quantity,
+        uom: 'KG',
+        fromLocation: 'PLANT01-RM-WH-AVAILABLE',
+        toLocation: `WIP-${order.operations[0]?.workCenterCode || 'WC-CUT-01'}`,
+        lotNumber,
+        sourceDocument: order.orderNumber,
+        movementType: 'GI_PRODUCTION',
+        stockBucket: 'WIP',
+      };
+
+      const audit: AuditLogEntry = {
+        id: `aud-${Date.now()}`,
+        documentId: order.orderNumber,
+        documentType: 'MATERIAL_ISSUE',
+        action: 'ISSUE_MATERIAL',
+        actor: state.currentUser.name,
+        role: state.currentUser.role,
+        timestamp: timeStr,
+        decision: 'EXECUTED',
+        reason: `Issued ${quantity} of ${componentSku} (Lot: ${lotNumber}) to ${order.orderNumber}.`,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        stockMovements: [movement, ...prev.stockMovements],
+        auditLogs: [audit, ...prev.auditLogs],
+      }));
+
+      addNotification('success', `Issued ${quantity} of ${componentSku} (Lot: ${lotNumber}) to ${order.orderNumber}.`);
+      return { success: true };
+    },
+    [state.stockMovements, state.productionOrders, state.currentUser, addNotification]
+  );
+
+  // 19. Switch Current User Persona (for testing SoD and multi-role workflows)
+  const switchCurrentUser = useCallback(
+    (persona: { id: string; name: string; role: string }) => {
+      setState((prev) => ({
+        ...prev,
+        currentUser: persona,
+      }));
+      addNotification('info', `Active user switched to: ${persona.name} (${persona.role})`);
+    },
+    [addNotification]
+  );
+
   // Reset to initial baseline
   const resetDemoState = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
@@ -781,5 +1436,15 @@ export function useErpStore() {
     runTestingScenario,
     resetDemoState,
     logAudit,
+    // Procurement & Stock Invariants
+    createPurchaseRequisition,
+    approvePurchaseRequisition,
+    rejectPurchaseRequisition,
+    createPurchaseOrder,
+    approvePurchaseOrder,
+    postGoodsReceipt,
+    releaseQcInspection,
+    issueMaterialToProduction,
+    switchCurrentUser,
   };
 }

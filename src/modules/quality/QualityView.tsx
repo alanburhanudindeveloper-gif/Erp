@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -14,6 +14,15 @@ import {
 import { QualityInspection, NonConformanceReport, ReworkOrder, ReasonCode } from '../../types';
 import { StatusBadge } from '../../components/common/StatusBadge';
 import { AiRootCauseModal } from '../../components/ai/AiRootCauseModal';
+import {
+  EnterpriseDataGrid,
+  GridColumn,
+  createTextColumn,
+  createNumberColumn,
+  createCurrencyColumn,
+  createStatusColumn,
+  createActionColumn,
+} from '../../components/data-grid';
 
 interface QualityViewProps {
   inspections: QualityInspection[];
@@ -22,6 +31,12 @@ interface QualityViewProps {
   reasonCodes: ReasonCode[];
   activeSubTab: string;
   onSelectSubTab: (tab: string) => void;
+  onReleaseQc?: (
+    inspectionId: string,
+    decision: 'PASS' | 'FAIL',
+    disposition: 'UNRESTRICTED' | 'HOLD' | 'REJECT' | 'REWORK',
+    notes: string
+  ) => void;
 }
 
 export const QualityView: React.FC<QualityViewProps> = ({
@@ -31,6 +46,7 @@ export const QualityView: React.FC<QualityViewProps> = ({
   reasonCodes,
   activeSubTab,
   onSelectSubTab,
+  onReleaseQc,
 }) => {
   const [rootCauseModal, setRootCauseModal] = useState<{
     isOpen: boolean;
@@ -48,26 +64,230 @@ export const QualityView: React.FC<QualityViewProps> = ({
     operatorData: null,
   });
 
+  // 1. Quality Inspections Columns
+  const inspectionColumns = useMemo<GridColumn<QualityInspection>[]>(
+    () => [
+      createTextColumn<QualityInspection>('inspectionNo', 'Inspection #', {
+        isCode: true,
+        pinned: 'left',
+        width: 140,
+      }),
+      {
+        field: 'sourceRef',
+        headerName: 'Order / Lot #',
+        type: 'text',
+        width: 170,
+        renderCell: ({ row }) => (
+          <div>
+            <span className="text-blue-600 dark:text-blue-400 font-semibold block">{row.sourceRef}</span>
+            <span className="text-[10px] text-slate-400 font-mono">{row.lotNumber}</span>
+          </div>
+        ),
+      },
+      createTextColumn<QualityInspection>('operationName', 'Operation Tested', { width: 170 }),
+      createNumberColumn<QualityInspection>('sampleSize', 'Sample Size', { width: 100 }),
+      createNumberColumn<QualityInspection>('defectsCount', 'Defects', {
+        width: 90,
+        renderCell: ({ value }) => (
+          <span
+            className={`font-mono font-bold tabular-nums ${
+              value > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
+            }`}
+          >
+            {value}
+          </span>
+        ),
+      }),
+      {
+        field: 'characteristic',
+        headerName: 'Characteristic & Spec',
+        type: 'text',
+        width: 220,
+        renderCell: ({ row }) => (
+          <div>
+            <div className="font-medium text-slate-800 dark:text-slate-200">{row.characteristic}</div>
+            <div className="text-[10px] text-slate-400 font-mono">{row.specification}</div>
+          </div>
+        ),
+      },
+      createStatusColumn<QualityInspection>('result', 'Result', {
+        width: 100,
+        filterOptions: [
+          { label: 'PASS', value: 'PASS' },
+          { label: 'FAIL', value: 'FAIL' },
+        ],
+      }),
+      createStatusColumn<QualityInspection>('disposition', 'Disposition', {
+        width: 140,
+        filterOptions: [
+          { label: 'UNRESTRICTED', value: 'UNRESTRICTED' },
+          { label: 'HOLD', value: 'HOLD' },
+          { label: 'REJECT', value: 'REJECT' },
+        ],
+      }),
+      createTextColumn<QualityInspection>('inspector', 'Inspector', { width: 140 }),
+      createActionColumn<QualityInspection>(
+        ({ row }) => {
+          if (row.disposition === 'HOLD' && onReleaseQc) {
+            return (
+              <div className="flex items-center justify-end gap-1.5">
+                <button
+                  onClick={() =>
+                    onReleaseQc(
+                      row.id,
+                      'PASS',
+                      'UNRESTRICTED',
+                      'Sample passed metallurgical inspection. Mill cert validated. Released to AVAILABLE.'
+                    )
+                  }
+                  title="Release quarantined stock to Available bucket (UC-QA-002)"
+                  className="px-2 py-0.5 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded transition-colors whitespace-nowrap"
+                >
+                  Release
+                </button>
+                <button
+                  onClick={() =>
+                    onReleaseQc(
+                      row.id,
+                      'FAIL',
+                      'REJECT',
+                      'Dimensional tolerances out of spec. Stock rejected and flagged for NCR.'
+                    )
+                  }
+                  title="Reject quarantined stock and generate Non-Conformance Report"
+                  className="px-2 py-0.5 text-[11px] font-semibold bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-200 dark:border-rose-800 rounded transition-colors whitespace-nowrap"
+                >
+                  Reject
+                </button>
+              </div>
+            );
+          }
+          return (
+            <span className="text-slate-400 text-[11px] font-mono">
+              {row.disposition === 'UNRESTRICTED' ? 'Released' : 'Closed'}
+            </span>
+          );
+        },
+        { width: 170, headerName: 'Disposition Action' }
+      ),
+    ],
+    [onReleaseQc]
+  );
+
+  // 2. NCR Columns
+  const ncrColumns = useMemo<GridColumn<NonConformanceReport>[]>(
+    () => [
+      createTextColumn<NonConformanceReport>('ncrNo', 'NCR #', { isCode: true, pinned: 'left', width: 140 }),
+      createTextColumn<NonConformanceReport>('orderNumber', 'Order Ref', { isCode: true, width: 140 }),
+      createTextColumn<NonConformanceReport>('lotNumber', 'Lot Number', { isCode: true, width: 130 }),
+      createNumberColumn<NonConformanceReport>('quantityAffected', 'Affected Qty', {
+        uomText: 'PCS',
+        width: 120,
+        renderCell: ({ value }) => (
+          <span className="font-mono font-bold text-rose-700 dark:text-rose-400 tabular-nums">
+            {value} PCS
+          </span>
+        ),
+      }),
+      createTextColumn<NonConformanceReport>('defectDescription', 'Defect Description', { width: 220 }),
+      createTextColumn<NonConformanceReport>('rootCause', 'Root Cause', {
+        width: 200,
+        renderCell: ({ value }) => (
+          <span className="text-slate-600 dark:text-slate-400 text-xs">
+            {value || 'Under investigation'}
+          </span>
+        ),
+      }),
+      createStatusColumn<NonConformanceReport>('disposition', 'Disposition', { width: 130 }),
+      createStatusColumn<NonConformanceReport>('status', 'Status', { width: 120 }),
+      createActionColumn<NonConformanceReport>(
+        ({ row }) => (
+          <button
+            onClick={() =>
+              setRootCauseModal({
+                isOpen: true,
+                anomalyTitle: `${row.ncrNo}: ${row.defectDescription}`,
+                defectData: {
+                  qtyAffected: row.quantityAffected,
+                  disposition: row.disposition,
+                },
+                machineData: { code: 'WC-CUT-01', model: 'CNC Saw M01' },
+                lotData: { lotNumber: row.lotNumber, material: 'Raw Steel Sheet' },
+                operatorData: { shift: 'Morning', operator: 'Budi Santoso' },
+              })
+            }
+            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/50 border border-rose-200 dark:border-rose-800 rounded transition-colors whitespace-nowrap shadow-2xs"
+            title="Analyze root cause hypotheses with AI (Section 9.3)"
+          >
+            <Sparkles className="w-3 h-3 text-rose-600 dark:text-rose-400" />
+            <span>Analyze Cause</span>
+          </button>
+        ),
+        { width: 140, headerName: 'Root Cause AI' }
+      ),
+    ],
+    []
+  );
+
+  // 3. Rework Orders Columns
+  const reworkColumns = useMemo<GridColumn<ReworkOrder>[]>(
+    () => [
+      createTextColumn<ReworkOrder>('reworkOrderNo', 'Rework Order #', {
+        isCode: true,
+        pinned: 'left',
+        width: 150,
+      }),
+      createTextColumn<ReworkOrder>('parentOrderNumber', 'Parent MO', { isCode: true, width: 140 }),
+      createTextColumn<ReworkOrder>('productSku', 'Item SKU', { isCode: true, width: 130 }),
+      createNumberColumn<ReworkOrder>('quantityToRework', 'Rework Qty', { uomText: 'PCS', width: 120 }),
+      createTextColumn<ReworkOrder>('reworkWorkCenter', 'Assigned Work Center', { width: 170 }),
+      createCurrencyColumn<ReworkOrder>('additionalCost', 'Added Cost', {
+        currency: 'USD',
+        decimals: 2,
+        width: 130,
+      }),
+      {
+        field: 'reinspectionPassed',
+        headerName: 'Re-inspection',
+        type: 'boolean',
+        width: 150,
+        renderCell: ({ value }) =>
+          value ? (
+            <span className="text-emerald-700 dark:text-emerald-400 font-semibold text-xs flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>PASS</span>
+            </span>
+          ) : (
+            <span className="text-slate-400 text-xs">Pending Re-check</span>
+          ),
+      },
+      createStatusColumn<ReworkOrder>('status', 'Status', { width: 130 }),
+    ],
+    []
+  );
+
   return (
     <div className="space-y-4">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold text-slate-900 tracking-tight">Quality Assurance & Disposition</h2>
-          <p className="text-xs text-slate-500">
+          <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100 tracking-tight">
+            Quality Assurance & Disposition
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             First Article Inspections (FAI), in-process QC sampling, Non-Conformance Reports (NCR), and rework control.
           </p>
         </div>
       </div>
 
       {/* Sub-tabs */}
-      <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto text-xs font-medium">
+      <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-800 overflow-x-auto text-xs font-medium">
         <button
           onClick={() => onSelectSubTab('inspections')}
           className={`px-3 py-2 border-b-2 transition-colors whitespace-nowrap ${
             activeSubTab === 'inspections'
-              ? 'border-slate-900 text-slate-900 font-semibold'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
+              ? 'border-slate-900 dark:border-white text-slate-900 dark:text-white font-semibold'
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
         >
           Quality Inspections ({inspections.length})
@@ -76,8 +296,8 @@ export const QualityView: React.FC<QualityViewProps> = ({
           onClick={() => onSelectSubTab('reject-scrap')}
           className={`px-3 py-2 border-b-2 transition-colors whitespace-nowrap ${
             activeSubTab === 'reject-scrap'
-              ? 'border-slate-900 text-slate-900 font-semibold'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
+              ? 'border-slate-900 dark:border-white text-slate-900 dark:text-white font-semibold'
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
         >
           Non-Conformance Reports (NCR) ({ncrs.length})
@@ -86,8 +306,8 @@ export const QualityView: React.FC<QualityViewProps> = ({
           onClick={() => onSelectSubTab('rework')}
           className={`px-3 py-2 border-b-2 transition-colors whitespace-nowrap ${
             activeSubTab === 'rework'
-              ? 'border-slate-900 text-slate-900 font-semibold'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
+              ? 'border-slate-900 dark:border-white text-slate-900 dark:text-white font-semibold'
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
         >
           Rework Orders ({reworkOrders.length})
@@ -96,8 +316,8 @@ export const QualityView: React.FC<QualityViewProps> = ({
           onClick={() => onSelectSubTab('quarantine')}
           className={`px-3 py-2 border-b-2 transition-colors whitespace-nowrap ${
             activeSubTab === 'quarantine'
-              ? 'border-slate-900 text-slate-900 font-semibold'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
+              ? 'border-slate-900 dark:border-white text-slate-900 dark:text-white font-semibold'
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
         >
           Quarantine Hold
@@ -106,8 +326,7 @@ export const QualityView: React.FC<QualityViewProps> = ({
 
       {/* 1. Quality Inspections Tab */}
       {activeSubTab === 'inspections' && (
-        <div className="space-y-4">
-          {/* Page 98 Quality Flow Callout */}
+        <div className="space-y-3">
           <div className="p-3 bg-slate-900 text-slate-200 rounded-lg text-xs font-mono border border-slate-800 flex items-center justify-between">
             <div>
               <span className="text-amber-400 font-bold block">PDF Section 29: Quality Flow Specification</span>
@@ -120,221 +339,107 @@ export const QualityView: React.FC<QualityViewProps> = ({
             </span>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-xs">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50/30 text-slate-500 font-semibold">
-                  <th className="py-2.5 px-4">Inspection #</th>
-                  <th className="py-2.5 px-4">Order / Lot #</th>
-                  <th className="py-2.5 px-4">Operation Tested</th>
-                  <th className="py-2.5 px-4 text-right">Sample Size</th>
-                  <th className="py-2.5 px-4 text-right">Defects</th>
-                  <th className="py-2.5 px-4">Test Characteristic & Spec</th>
-                  <th className="py-2.5 px-4">Result</th>
-                  <th className="py-2.5 px-4">Disposition</th>
-                  <th className="py-2.5 px-4">Inspector</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-mono">
-                {inspections.map((qc) => (
-                  <tr key={qc.id} className="hover:bg-slate-50/60">
-                    <td className="py-3 px-4 font-bold text-slate-900">{qc.inspectionNo}</td>
-                    <td className="py-3 px-4">
-                      <span className="text-blue-600 font-semibold block">{qc.sourceRef}</span>
-                      <span className="text-[11px] text-slate-400">{qc.lotNumber}</span>
-                    </td>
-                    <td className="py-3 px-4 font-sans text-slate-800">{qc.operationName}</td>
-                    <td className="py-3 px-4 text-right tabular-nums text-slate-800">{qc.sampleSize}</td>
-                    <td className={`py-3 px-4 text-right tabular-nums font-bold ${
-                      qc.defectsCount > 0 ? 'text-rose-700' : 'text-emerald-700'
-                    }`}>
-                      {qc.defectsCount}
-                    </td>
-                    <td className="py-3 px-4 font-sans text-xs">
-                      <span className="font-medium text-slate-800 block">{qc.characteristic}</span>
-                      <span className="text-slate-400 text-[11px] font-mono">{qc.specification}</span>
-                    </td>
-                    <td className="py-3 px-4 font-sans">
-                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded ${
-                        qc.result === 'PASS' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
-                      }`}>
-                        {qc.result}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 font-sans">
-                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded ${
-                        qc.disposition === 'UNRESTRICTED'
-                          ? 'bg-emerald-50 text-emerald-700'
-                          : qc.disposition === 'HOLD'
-                          ? 'bg-amber-50 text-amber-700'
-                          : 'bg-rose-50 text-rose-700'
-                      }`}>
-                        {qc.disposition}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 font-sans text-slate-600">{qc.inspector}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <EnterpriseDataGrid<QualityInspection>
+            data={inspections}
+            columns={inspectionColumns}
+            pagination
+            searchable
+            filtering
+            sorting
+            columnResizing
+            exportable
+            exportFileName="quality_inspections_report"
+            density="compact"
+          />
         </div>
       )}
 
       {/* 2. Non-Conformance Reports (NCR) */}
       {activeSubTab === 'reject-scrap' && (
-        <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-xs">
-          <div className="p-3 bg-slate-50/60 border-b border-slate-200 flex items-center justify-between text-xs">
-            <span className="font-semibold text-slate-700">Formal Non-Conformance Reports (NCR)</span>
-            <span className="text-slate-500">Root cause analysis & quality hold tracking</span>
+        <div className="space-y-3">
+          <div className="p-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-md flex items-center justify-between text-xs">
+            <span className="font-semibold text-slate-700 dark:text-slate-300">
+              Formal Non-Conformance Reports (NCR)
+            </span>
+            <span className="text-slate-500 dark:text-slate-400">
+              Root cause analysis & quality hold tracking
+            </span>
           </div>
 
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50/30 text-slate-500 font-semibold">
-                <th className="py-2.5 px-4">NCR #</th>
-                <th className="py-2.5 px-4">Production Order</th>
-                <th className="py-2.5 px-4">Lot #</th>
-                <th className="py-2.5 px-4 text-right">Affected Qty</th>
-                <th className="py-2.5 px-4">Defect Description</th>
-                <th className="py-2.5 px-4">Root Cause</th>
-                <th className="py-2.5 px-4">Disposition</th>
-                <th className="py-2.5 px-4">Status</th>
-                <th className="py-2.5 px-4 text-right">Root Cause (AI)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 font-mono">
-              {ncrs.map((ncr) => (
-                <tr key={ncr.id} className="hover:bg-slate-50/60">
-                  <td className="py-3 px-4 font-bold text-slate-900">{ncr.ncrNo}</td>
-                  <td className="py-3 px-4 text-blue-600 font-semibold">{ncr.orderNumber}</td>
-                  <td className="py-3 px-4 text-slate-700">{ncr.lotNumber}</td>
-                  <td className="py-3 px-4 text-right tabular-nums text-rose-700 font-bold">
-                    {ncr.quantityAffected} PCS
-                  </td>
-                  <td className="py-3 px-4 font-sans text-slate-800">{ncr.defectDescription}</td>
-                  <td className="py-3 px-4 font-sans text-slate-500 text-xs">{ncr.rootCause || 'Under investigation'}</td>
-                  <td className="py-3 px-4 font-sans">
-                    <span className="text-amber-800 bg-amber-50 px-2 py-0.5 rounded text-[11px] font-semibold">
-                      {ncr.disposition}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 font-sans">
-                    <StatusBadge status={ncr.status} />
-                  </td>
-                  <td className="py-3 px-4 text-right">
-                    <button
-                      onClick={() =>
-                        setRootCauseModal({
-                          isOpen: true,
-                          anomalyTitle: `${ncr.ncrNo}: ${ncr.defectDescription}`,
-                          defectData: {
-                            qtyAffected: ncr.quantityAffected,
-                            disposition: ncr.disposition,
-                          },
-                          machineData: { code: 'WC-CUT-01', model: 'CNC Saw M01' },
-                          lotData: { lotNumber: ncr.lotNumber, material: 'Raw Steel Sheet' },
-                          operatorData: { shift: 'Morning', operator: 'Budi Santoso' },
-                        })
-                      }
-                      className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded transition-colors whitespace-nowrap shadow-2xs"
-                      title="Analyze root cause hypotheses with AI (Section 9.3)"
-                    >
-                      <Sparkles className="w-3 h-3 text-rose-600" />
-                      <span>Analyze Cause</span>
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <EnterpriseDataGrid<NonConformanceReport>
+            data={ncrs}
+            columns={ncrColumns}
+            pagination
+            searchable
+            filtering
+            sorting
+            columnResizing
+            exportable
+            exportFileName="non_conformance_reports"
+            density="compact"
+          />
         </div>
       )}
 
-      {/* 3. Rework Orders (Page 104) */}
+      {/* 3. Rework Orders */}
       {activeSubTab === 'rework' && (
-        <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-xs">
-          <div className="p-3 bg-slate-50/60 border-b border-slate-200 flex items-center justify-between text-xs">
-            <span className="font-semibold text-slate-700">Rework Manufacturing Orders (Page 104)</span>
-            <span className="text-slate-500">Rework consumes additional labor/material and increases actual cost</span>
+        <div className="space-y-3">
+          <div className="p-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-md flex items-center justify-between text-xs">
+            <span className="font-semibold text-slate-700 dark:text-slate-300">
+              Rework Manufacturing Orders (Page 104)
+            </span>
+            <span className="text-slate-500 dark:text-slate-400">
+              Rework consumes additional labor/material and increases actual cost
+            </span>
           </div>
 
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50/30 text-slate-500 font-semibold">
-                <th className="py-2.5 px-4">Rework Order #</th>
-                <th className="py-2.5 px-4">Parent MO</th>
-                <th className="py-2.5 px-4">Item SKU</th>
-                <th className="py-2.5 px-4 text-right">Rework Qty</th>
-                <th className="py-2.5 px-4">Assigned Work Center</th>
-                <th className="py-2.5 px-4 text-right">Added Cost</th>
-                <th className="py-2.5 px-4">Reinspection</th>
-                <th className="py-2.5 px-4">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 font-mono">
-              {reworkOrders.map((rwk) => (
-                <tr key={rwk.id} className="hover:bg-slate-50/60">
-                  <td className="py-3 px-4 font-bold text-slate-900">{rwk.reworkOrderNo}</td>
-                  <td className="py-3 px-4 text-blue-600 font-semibold">{rwk.parentOrderNumber}</td>
-                  <td className="py-3 px-4 text-slate-800">{rwk.productSku}</td>
-                  <td className="py-3 px-4 text-right tabular-nums font-bold text-slate-900">
-                    {rwk.quantityToRework} PCS
-                  </td>
-                  <td className="py-3 px-4 font-sans text-slate-700">{rwk.reworkWorkCenter}</td>
-                  <td className="py-3 px-4 text-right tabular-nums text-rose-700 font-semibold">
-                    +${rwk.additionalCost.toFixed(2)}
-                  </td>
-                  <td className="py-3 px-4 font-sans">
-                    {rwk.reinspectionPassed ? (
-                      <span className="text-emerald-700 font-semibold text-xs flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Re-inspected PASS</span>
-                      </span>
-                    ) : (
-                      <span className="text-slate-400 text-xs">Pending Re-check</span>
-                    )}
-                  </td>
-                  <td className="py-3 px-4 font-sans">
-                    <StatusBadge status={rwk.status} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <EnterpriseDataGrid<ReworkOrder>
+            data={reworkOrders}
+            columns={reworkColumns}
+            pagination
+            searchable
+            filtering
+            sorting
+            columnResizing
+            exportable
+            exportFileName="rework_manufacturing_orders"
+            density="compact"
+          />
         </div>
       )}
 
       {/* 4. Quarantine Hold */}
       {activeSubTab === 'quarantine' && (
-        <div className="bg-white border border-slate-200 rounded-lg p-5 space-y-3 shadow-xs text-xs">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5 space-y-3 shadow-xs text-xs">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-500" />
-            <h4 className="font-semibold text-slate-900">Active Quarantine Hold Warehouse Locations</h4>
+            <h4 className="font-semibold text-slate-900 dark:text-slate-100">
+              Active Quarantine Hold Warehouse Locations
+            </h4>
           </div>
-          <p className="text-slate-500">
+          <p className="text-slate-500 dark:text-slate-400">
             Physical stock placed on hold pending engineering evaluation, MRB (Material Review Board) decision, or customer concession.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
-            <div className="p-3 bg-amber-50/40 rounded border border-amber-200 space-y-1">
+            <div className="p-3 bg-amber-50/40 dark:bg-amber-950/20 rounded border border-amber-200 dark:border-amber-800 space-y-1">
               <div className="flex items-center justify-between font-mono">
-                <span className="font-bold text-slate-900">QUAR-RACK-03</span>
-                <span className="text-amber-800 font-semibold">HOLD</span>
+                <span className="font-bold text-slate-900 dark:text-slate-100">QUAR-RACK-03</span>
+                <span className="text-amber-800 dark:text-amber-400 font-semibold">HOLD</span>
               </div>
-              <div className="text-slate-800 font-semibold">300 MTR Material Y (Copper Wire)</div>
-              <p className="text-[11px] text-slate-500">
+              <div className="text-slate-800 dark:text-slate-200 font-semibold">300 MTR Material Y (Copper Wire)</div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 Reason: Insulation micro-cracking observed on outer spool layer. Awaiting vendor replacement or test certification.
               </p>
             </div>
 
-            <div className="p-3 bg-slate-50 rounded border border-slate-200 space-y-1">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded border border-slate-200 dark:border-slate-800 space-y-1">
               <div className="flex items-center justify-between font-mono">
-                <span className="font-bold text-slate-900">QUAR-BIN-B</span>
-                <span className="text-emerald-700 font-semibold">RELEASED</span>
+                <span className="font-bold text-slate-900 dark:text-slate-100">QUAR-BIN-B</span>
+                <span className="text-emerald-700 dark:text-emerald-400 font-semibold">RELEASED</span>
               </div>
-              <div className="text-slate-800 font-semibold">4 PCS Product A (Extrusion Length)</div>
-              <p className="text-[11px] text-slate-500">
+              <div className="text-slate-800 dark:text-slate-200 font-semibold">4 PCS Product A (Extrusion Length)</div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 Rework Order RWK-2026-004 completed; dimensions re-machined within spec. Unrestricted release granted.
               </p>
             </div>
@@ -351,7 +456,7 @@ export const QualityView: React.FC<QualityViewProps> = ({
         machineData={rootCauseModal.machineData}
         lotData={rootCauseModal.lotData}
         operatorData={rootCauseModal.operatorData}
-        onCreateCapa={(capa) => {
+        onCreateCapa={() => {
           alert(`CAPA Ticket registered from AI root-cause analysis! Containment action dispatched to shop floor lead.`);
         }}
       />

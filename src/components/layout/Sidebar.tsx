@@ -20,12 +20,14 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Calendar,
+  ShoppingCart,
 } from 'lucide-react';
 
 export type MainNavId =
   | 'dashboard'
   | 'master-data'
   | 'planning'
+  | 'procurement'
   | 'manufacturing'
   | 'inventory'
   | 'quality'
@@ -71,6 +73,17 @@ const NAV_ITEMS: NavItem[] = [
       { id: 'demand', label: 'Demand (MTO / MTS)' },
       { id: 'mps', label: 'Master Schedule (MPS)' },
       { id: 'mrp', label: 'MRP Calculation Engine' },
+    ],
+  },
+  {
+    id: 'procurement',
+    label: 'Procurement & GRN',
+    icon: ShoppingCart,
+    subItems: [
+      { id: 'pr', label: 'Purchase Requisitions (PR)' },
+      { id: 'po', label: 'Purchase Orders (PO)' },
+      { id: 'grn', label: 'Receiving Dock & GRN' },
+      { id: 'suppliers', label: 'Certified Suppliers' },
     ],
   },
   {

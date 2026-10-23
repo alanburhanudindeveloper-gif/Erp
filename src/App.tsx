@@ -16,6 +16,7 @@ import { ReportsView } from './modules/reports/ReportsView';
 import { AuditGovernanceView } from './modules/admin/AuditGovernanceView';
 import { TestingMatrixView } from './modules/testing/TestingMatrixView';
 import { ManufacturingWorkflowGuide } from './modules/learn/ManufacturingWorkflowGuide';
+import { ProcurementView } from './modules/procurement/ProcurementView';
 import { AiBudgetTelemetryModal } from './components/ai/AiBudgetTelemetryModal';
 import { Bell, X } from 'lucide-react';
 
@@ -36,6 +37,15 @@ export default function App() {
     runMRP,
     runTestingScenario,
     resetDemoState,
+    createPurchaseRequisition,
+    approvePurchaseRequisition,
+    rejectPurchaseRequisition,
+    createPurchaseOrder,
+    approvePurchaseOrder,
+    postGoodsReceipt,
+    releaseQcInspection,
+    issueMaterialToProduction,
+    switchCurrentUser,
   } = useErpStore();
 
   const [activeNav, setActiveNav] = useState<MainNavId>('dashboard');
@@ -74,6 +84,7 @@ export default function App() {
     } else {
       if (nav === 'master-data') setActiveSubTab('products');
       else if (nav === 'planning') setActiveSubTab('demand');
+      else if (nav === 'procurement') setActiveSubTab('pr');
       else if (nav === 'manufacturing') setActiveSubTab('production-orders');
       else if (nav === 'inventory') setActiveSubTab('material-availability');
       else if (nav === 'quality') setActiveSubTab('inspections');
@@ -94,6 +105,8 @@ export default function App() {
       ? 'Master Data'
       : activeNav === 'planning'
       ? 'Planning & MPS'
+      : activeNav === 'procurement'
+      ? 'Procurement & Inbound Dock'
       : activeNav === 'manufacturing'
       ? 'Manufacturing'
       : activeNav === 'inventory'
@@ -188,6 +201,26 @@ export default function App() {
             />
           )}
 
+          {activeNav === 'procurement' && (
+            <ProcurementView
+              purchaseRequisitions={state.purchaseRequisitions}
+              purchaseOrders={state.purchaseOrders}
+              goodsReceiptNotes={state.goodsReceiptNotes}
+              suppliers={state.suppliers}
+              products={state.products}
+              currentUser={state.currentUser}
+              activeSubTab={activeSubTab}
+              onSelectSubTab={setActiveSubTab}
+              onCreatePR={createPurchaseRequisition}
+              onApprovePR={approvePurchaseRequisition}
+              onRejectPR={rejectPurchaseRequisition}
+              onCreatePO={createPurchaseOrder}
+              onPostGRN={postGoodsReceipt}
+              onSwitchUser={switchCurrentUser}
+              onNavigateToQuality={() => handleSelectNav('quality', 'inspections')}
+            />
+          )}
+
           {activeNav === 'manufacturing' && (
             <ManufacturingView
               orders={state.productionOrders}
@@ -214,6 +247,7 @@ export default function App() {
               orders={state.productionOrders}
               activeSubTab={activeSubTab}
               onSelectSubTab={setActiveSubTab}
+              onIssueMaterial={issueMaterialToProduction}
             />
           )}
 
@@ -225,6 +259,7 @@ export default function App() {
               reasonCodes={state.reasonCodes}
               activeSubTab={activeSubTab}
               onSelectSubTab={setActiveSubTab}
+              onReleaseQc={releaseQcInspection}
             />
           )}
 

@@ -425,6 +425,127 @@ export interface ReworkOrder {
   reinspectionPassed: boolean;
 }
 
+// 16.5 MULTI-BUCKET STOCK & PROCUREMENT (UC-INV-001 & UC-PRC-001..004)
+export type StockBucket = 'AVAILABLE' | 'RESERVED' | 'HOLD' | 'REJECTED' | 'WIP';
+
+export interface Supplier {
+  id: string;
+  code: string;
+  name: string;
+  category: string;
+  rating: number;
+  paymentTerms: string;
+  contactEmail: string;
+  active: boolean;
+}
+
+export type PurchaseRequisitionStatus =
+  | 'DRAFT'
+  | 'PENDING_APPROVAL'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'PO_GENERATED'
+  | 'CLOSED';
+
+export interface PurchaseRequisitionItem {
+  id: string;
+  productId: string;
+  sku: string;
+  name: string;
+  quantity: number;
+  uom: UomCode;
+  estimatedPrice: number;
+  totalCost: number;
+  supplierPreferred?: string;
+}
+
+export interface PurchaseRequisition {
+  id: string;
+  prNumber: string; // e.g. PR-2026-000001
+  requesterId: string;
+  requesterName: string;
+  department: string;
+  requiredDate: string;
+  reason: string;
+  plantId: string;
+  status: PurchaseRequisitionStatus;
+  totalAmount: number;
+  approvalLevelRequired: 1 | 2 | 3; // 1: <10M, 2: 10-100M, 3: >100M
+  items: PurchaseRequisitionItem[];
+  approvedBy?: string;
+  approvedAt?: string;
+  rejectionReason?: string;
+  createdAt: string;
+}
+
+export type PurchaseOrderStatus =
+  | 'DRAFT'
+  | 'PENDING_APPROVAL'
+  | 'APPROVED'
+  | 'PARTIALLY_RECEIVED'
+  | 'FULLY_RECEIVED'
+  | 'CANCELLED';
+
+export interface PurchaseOrderItem {
+  id: string;
+  productId: string;
+  sku: string;
+  name: string;
+  orderedQty: number;
+  receivedQty: number;
+  unitPrice: number;
+  totalAmount: number;
+  uom: UomCode;
+  qcRequired: boolean;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  poNumber: string; // e.g. PO-2026-000001
+  prReference?: string;
+  prId?: string;
+  supplierId: string;
+  supplierName: string;
+  orderDate: string;
+  expectedDeliveryDate: string;
+  paymentTerms: string;
+  destinationWarehouse: string;
+  status: PurchaseOrderStatus;
+  items: PurchaseOrderItem[];
+  totalAmount: number;
+  createdBy: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  createdAt: string;
+}
+
+export interface GoodsReceiptItem {
+  id: string;
+  productId: string;
+  sku: string;
+  name: string;
+  receivedQty: number;
+  uom: UomCode;
+  supplierLot: string;
+  qcRequired: boolean;
+  stockBucket: 'AVAILABLE' | 'HOLD';
+  targetLocation: string;
+  inspectionId?: string;
+}
+
+export interface GoodsReceiptNote {
+  id: string;
+  grnNumber: string; // e.g. GRN-2026-000001
+  poId: string;
+  poNumber: string;
+  supplierName: string;
+  receivedDate: string;
+  receivedBy: string;
+  items: GoodsReceiptItem[];
+  notes?: string;
+  stockBucketSummary: string;
+}
+
 // 17. INVENTORY LEDGER (IMMUTABLE STOCK MOVEMENTS)
 export interface StockMovement {
   id: string;
@@ -439,6 +560,7 @@ export interface StockMovement {
   lotNumber: string;
   sourceDocument: string;
   movementType: 'GR_PURCHASE' | 'GI_PRODUCTION' | 'GR_PRODUCTION' | 'TRANSFER' | 'SCRAP' | 'REVERSAL';
+  stockBucket?: StockBucket;
   isReversed?: boolean;
 }
 
