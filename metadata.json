@@ -1,0 +1,6 @@
+{
+  "name": "Kranex Industrial ERP",
+  "description": "Production-grade Manufacturing ERP with Master Data, MRP engine, Production Orders, Shop Floor Kiosk, Inventory Backflush, Quality Control, and Costing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
