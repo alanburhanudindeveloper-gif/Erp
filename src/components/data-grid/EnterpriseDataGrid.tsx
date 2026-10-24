@@ -47,6 +47,15 @@ export function EnterpriseDataGrid<T extends Record<string, any>>({
   exportFileName = 'export-data',
   stickyHeader = true,
   height,
+  serverSide = false,
+  totalCount,
+  currentPage: controlledCurrentPage,
+  onQueryChange,
+  onPageChange,
+  onPageSizeChange,
+  onSortChange,
+  onFilterChange,
+  onSearchChange,
   onRowClick,
   renderDetailRow,
   rowClassNames,
@@ -64,8 +73,11 @@ export function EnterpriseDataGrid<T extends Record<string, any>>({
   const [sortModel, setSortModel] = useState<SortModel | undefined>(undefined);
 
   // 4. Pagination State
-  const [currentPage, setCurrentPage] = useState(1);
+  const [internalCurrentPage, setInternalCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(initialPageSize);
+
+  const activeCurrentPage =
+    serverSide && controlledCurrentPage !== undefined ? controlledCurrentPage : internalCurrentPage;
 
   // 5. Column Customization (Widths, Hidden, Pinning)
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
@@ -131,42 +143,113 @@ export function EnterpriseDataGrid<T extends Record<string, any>>({
   const handleSortChange = useCallback(
     (field: string) => {
       if (!sorting) return;
+      let nextSort: SortModel | undefined;
       setSortModel((prev) => {
         if (!prev || prev.field !== field) {
-          return { field, direction: 'asc' };
+          nextSort = { field, direction: 'asc' };
+        } else if (prev.direction === 'asc') {
+          nextSort = { field, direction: 'desc' };
+        } else {
+          nextSort = undefined; // Clear sorting
         }
-        if (prev.direction === 'asc') {
-          return { field, direction: 'desc' };
-        }
-        return undefined; // Clear sorting
+        return nextSort;
       });
+
+      if (onSortChange) onSortChange(nextSort);
+      if (onQueryChange) {
+        onQueryChange({
+          page: activeCurrentPage,
+          pageSize,
+          sort: nextSort,
+          filters,
+          search: searchQuery,
+        });
+      }
     },
-    [sorting]
+    [sorting, onSortChange, onQueryChange, activeCurrentPage, pageSize, filters, searchQuery]
   );
 
   // Handle filter changes
-  const handleFilterChange = useCallback((colFilter: ColumnFilter | null) => {
-    if (!colFilter) return;
-    setFilters((prev) => {
-      const remaining = prev.filter((f) => f.field !== colFilter.field);
-      return [...remaining, colFilter];
-    });
-    setCurrentPage(1);
-  }, []);
+  const handleFilterChange = useCallback(
+    (colFilter: ColumnFilter | null) => {
+      if (!colFilter) return;
+      const nextFilters = [...filters.filter((f) => f.field !== colFilter.field), colFilter];
+      setFilters(nextFilters);
+      setInternalCurrentPage(1);
 
-  const handleClearColumnFilter = useCallback((field: string) => {
-    setFilters((prev) => prev.filter((f) => f.field !== field));
-    setCurrentPage(1);
-  }, []);
+      if (onFilterChange) onFilterChange(nextFilters);
+      if (onQueryChange) {
+        onQueryChange({
+          page: 1,
+          pageSize,
+          sort: sortModel,
+          filters: nextFilters,
+          search: searchQuery,
+        });
+      }
+    },
+    [filters, onFilterChange, onQueryChange, pageSize, sortModel, searchQuery]
+  );
+
+  const handleClearColumnFilter = useCallback(
+    (field: string) => {
+      const nextFilters = filters.filter((f) => f.field !== field);
+      setFilters(nextFilters);
+      setInternalCurrentPage(1);
+
+      if (onFilterChange) onFilterChange(nextFilters);
+      if (onQueryChange) {
+        onQueryChange({
+          page: 1,
+          pageSize,
+          sort: sortModel,
+          filters: nextFilters,
+          search: searchQuery,
+        });
+      }
+    },
+    [filters, onFilterChange, onQueryChange, pageSize, sortModel, searchQuery]
+  );
 
   const handleClearAllFilters = useCallback(() => {
     setFilters([]);
     setSearchQuery('');
-    setCurrentPage(1);
-  }, []);
+    setInternalCurrentPage(1);
 
-  // Filtered and Sorted Data Pipeline
+    if (onFilterChange) onFilterChange([]);
+    if (onSearchChange) onSearchChange('');
+    if (onQueryChange) {
+      onQueryChange({
+        page: 1,
+        pageSize,
+        sort: sortModel,
+        filters: [],
+        search: '',
+      });
+    }
+  }, [onFilterChange, onSearchChange, onQueryChange, pageSize, sortModel]);
+
+  const handleSearchChange = useCallback(
+    (q: string) => {
+      setSearchQuery(q);
+      setInternalCurrentPage(1);
+      if (onSearchChange) onSearchChange(q);
+      if (onQueryChange) {
+        onQueryChange({
+          page: 1,
+          pageSize,
+          sort: sortModel,
+          filters,
+          search: q,
+        });
+      }
+    },
+    [onSearchChange, onQueryChange, pageSize, sortModel, filters]
+  );
+
+  // Filtered and Sorted Data Pipeline (bypassed if serverSide)
   const filteredAndSortedData = useMemo(() => {
+    if (serverSide) return data;
     let result = [...data];
 
     // 1. Global Search
@@ -257,14 +340,15 @@ export function EnterpriseDataGrid<T extends Record<string, any>>({
     }
 
     return result;
-  }, [data, searchQuery, searchFields, filters, sortModel, initialColumns]);
+  }, [serverSide, data, searchQuery, searchFields, filters, sortModel, initialColumns]);
 
   // Paginated Data
   const paginatedData = useMemo(() => {
+    if (serverSide) return data;
     if (!pagination) return filteredAndSortedData;
-    const startIndex = (currentPage - 1) * pageSize;
+    const startIndex = (activeCurrentPage - 1) * pageSize;
     return filteredAndSortedData.slice(startIndex, startIndex + pageSize);
-  }, [filteredAndSortedData, pagination, currentPage, pageSize]);
+  }, [serverSide, data, filteredAndSortedData, pagination, activeCurrentPage, pageSize]);
 
   // Visible Columns with width and pinning applied
   const visibleColumns = useMemo(() => {
@@ -381,7 +465,7 @@ export function EnterpriseDataGrid<T extends Record<string, any>>({
       {searchable && (
         <GridToolbar
           searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
+          onSearchChange={handleSearchChange}
           searchPlaceholder={searchPlaceholder}
           columns={visibleColumns}
           onToggleColumnVisibility={columnVisibility ? handleToggleColumnVisibility : undefined}
@@ -393,8 +477,8 @@ export function EnterpriseDataGrid<T extends Record<string, any>>({
           exportable={exportable}
           activeFilterCount={filters.length}
           onClearAllFilters={handleClearAllFilters}
-          totalRowCount={data.length}
-          filteredRowCount={filteredAndSortedData.length}
+          totalRowCount={serverSide ? (totalCount ?? data.length) : data.length}
+          filteredRowCount={serverSide ? (totalCount ?? data.length) : filteredAndSortedData.length}
         />
       )}
 
@@ -649,14 +733,36 @@ export function EnterpriseDataGrid<T extends Record<string, any>>({
       {/* 4. Grid Pagination */}
       {pagination && (
         <GridPagination
-          currentPage={currentPage}
+          currentPage={activeCurrentPage}
           pageSize={pageSize}
-          totalItems={filteredAndSortedData.length}
+          totalItems={serverSide ? (totalCount ?? data.length) : filteredAndSortedData.length}
           pageSizeOptions={pageSizeOptions}
-          onPageChange={setCurrentPage}
+          onPageChange={(newPage) => {
+            setInternalCurrentPage(newPage);
+            if (onPageChange) onPageChange(newPage);
+            if (onQueryChange) {
+              onQueryChange({
+                page: newPage,
+                pageSize,
+                sort: sortModel,
+                filters,
+                search: searchQuery,
+              });
+            }
+          }}
           onPageSizeChange={(newSize) => {
             setPageSize(newSize);
-            setCurrentPage(1);
+            setInternalCurrentPage(1);
+            if (onPageSizeChange) onPageSizeChange(newSize);
+            if (onQueryChange) {
+              onQueryChange({
+                page: 1,
+                pageSize: newSize,
+                sort: sortModel,
+                filters,
+                search: searchQuery,
+              });
+            }
           }}
         />
       )}

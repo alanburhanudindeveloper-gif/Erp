@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { ProductionOrder, ReasonCode } from '../../types';
 import { StatusBadge } from '../../components/common/StatusBadge';
+import { ProductionTravelerModal } from './ProductionTravelerModal';
 
 interface ProductionOrderDetailProps {
   order: ProductionOrder;
@@ -49,6 +50,7 @@ export const ProductionOrderDetail: React.FC<ProductionOrderDetailProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'card' | 'operations' | 'materials' | 'output' | 'costing'>('card');
   const [showLogModal, setShowLogModal] = useState(false);
+  const [showTravelerModal, setShowTravelerModal] = useState(false);
   const [selectedOpSeq, setSelectedOpSeq] = useState<number>(
     order.operations.find(o => o.status === 'IN_PROGRESS' || o.status === 'READY')?.sequence || 10
   );
@@ -117,6 +119,15 @@ export const ProductionOrderDetail: React.FC<ProductionOrderDetailProps> = ({
               <span>Close MO & Post to Finished Goods</span>
             </button>
           )}
+
+          <button
+            onClick={() => setShowTravelerModal(true)}
+            className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded transition-colors flex items-center gap-1.5 shadow-2xs"
+            title="View Oracle Manufacturing style shop floor traveler & electronic record"
+          >
+            <FileText className="w-3.5 h-3.5 text-slate-600" />
+            <span>Production Traveler (E-Record)</span>
+          </button>
         </div>
       </div>
 
@@ -610,6 +621,13 @@ export const ProductionOrderDetail: React.FC<ProductionOrderDetailProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {showTravelerModal && (
+        <ProductionTravelerModal
+          order={order}
+          onClose={() => setShowTravelerModal(false)}
+        />
       )}
     </div>
   );

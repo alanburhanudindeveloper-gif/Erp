@@ -30,6 +30,21 @@ export interface ColumnFilter {
   secondValue?: any; // For between operator
 }
 
+export interface GridQuery {
+  page: number;
+  pageSize: number;
+  sort?: SortModel;
+  filters?: ColumnFilter[];
+  search?: string;
+}
+
+export interface GridResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export type DensityMode = 'compact' | 'comfortable';
 
 export interface GridColumn<T> {
@@ -73,6 +88,17 @@ export interface EnterpriseDataGridProps<T> {
   pagination?: boolean;
   pageSizeOptions?: number[];
   initialPageSize?: number;
+
+  // Server-side execution contract
+  serverSide?: boolean;
+  totalCount?: number;
+  currentPage?: number;
+  onQueryChange?: (query: GridQuery) => void;
+  onPageChange?: (page: number) => void;
+  onPageSizeChange?: (pageSize: number) => void;
+  onSortChange?: (sort: SortModel | undefined) => void;
+  onFilterChange?: (filters: ColumnFilter[]) => void;
+  onSearchChange?: (search: string) => void;
 
   sorting?: boolean;
   filtering?: boolean;

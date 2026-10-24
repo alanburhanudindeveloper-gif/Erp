@@ -8,12 +8,15 @@ import {
   AlertTriangle,
   Eye,
   Send,
+  FileText,
 } from 'lucide-react';
-import { ProductionOrder, Product, WorkCenter, ReasonCode } from '../../types';
+import { ProductionOrder, Product, WorkCenter, ReasonCode, SubcontractOrder, Supplier } from '../../types';
 import { StatusBadge } from '../../components/common/StatusBadge';
 import { ProductionOrderDetail } from './ProductionOrderDetail';
 import { ShopFloorTerminal } from './ShopFloorTerminal';
 import { ManufacturingGanttChart } from './ManufacturingGanttChart';
+import { SubcontractingView } from './SubcontractingView';
+import { ProductionTravelerModal } from './ProductionTravelerModal';
 import {
   EnterpriseDataGrid,
   GridColumn,
@@ -49,6 +52,10 @@ interface ManufacturingViewProps {
   onCompleteOperation: (orderId: string, seq: number) => void;
   onCloseOrder: (orderId: string) => void;
   onCreateOrder: (data: { productId: string; quantity: number; dueDate: string }) => void;
+  subcontractOrders?: SubcontractOrder[];
+  suppliers?: Supplier[];
+  onCreateSubcontractOrder?: (order: Omit<SubcontractOrder, 'id'>) => void;
+  onReceiveSubcontractOrder?: (orderId: string, receivedQty: number) => void;
 }
 
 export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
@@ -66,8 +73,13 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
   onCompleteOperation,
   onCloseOrder,
   onCreateOrder,
+  subcontractOrders = [],
+  suppliers = [],
+  onCreateSubcontractOrder,
+  onReceiveSubcontractOrder,
 }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [travelerOrder, setTravelerOrder] = useState<ProductionOrder | null>(null);
   const [newOrderProduct, setNewOrderProduct] = useState(products[0]?.id || '');
   const [newOrderQty, setNewOrderQty] = useState(500);
   const [newOrderDueDate, setNewOrderDueDate] = useState('2026-11-10');
@@ -120,6 +132,12 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
           >
             Shop Floor Terminal Kiosk
           </button>
+          <button
+            onClick={() => onSelectSubTab('subcontracting')}
+            className="px-3 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors whitespace-nowrap"
+          >
+            Subcontracting Operations ({subcontractOrders.length})
+          </button>
         </div>
 
         <ManufacturingGanttChart
@@ -147,6 +165,8 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
         onStartOp={onStartOperation}
         onLogOutput={onReportOutput}
         onCompleteOp={onCompleteOperation}
+        onReleaseOrder={onReleaseOrder}
+        onSelectOrder={onSelectOrder}
       />
     );
   }
@@ -246,6 +266,12 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
           >
             Shop Floor Terminal Kiosk
           </button>
+          <button
+            onClick={() => onSelectSubTab('subcontracting')}
+            className="px-3 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors whitespace-nowrap"
+          >
+            Subcontracting Operations ({subcontractOrders.length})
+          </button>
         </div>
 
         <div className="space-y-2">
@@ -272,6 +298,55 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
             density="compact"
           />
         </div>
+      </div>
+    );
+  }
+
+  // Subcontracting tab
+  if (activeSubTab === 'subcontracting') {
+    return (
+      <div className="space-y-4">
+        {/* Sub-tab Navigation */}
+        <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-800 overflow-x-auto text-xs font-medium">
+          <button
+            onClick={() => onSelectSubTab('production-orders')}
+            className="px-3 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors whitespace-nowrap"
+          >
+            Production Orders (MO) ({orders.length})
+          </button>
+          <button
+            onClick={() => onSelectSubTab('gantt')}
+            className="px-3 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors whitespace-nowrap"
+          >
+            Gantt Schedule & Dependencies
+          </button>
+          <button
+            onClick={() => onSelectSubTab('work-orders')}
+            className="px-3 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors whitespace-nowrap"
+          >
+            Work Orders Dispatch
+          </button>
+          <button
+            onClick={() => onSelectSubTab('shop-floor')}
+            className="px-3 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors whitespace-nowrap"
+          >
+            Shop Floor Terminal Kiosk
+          </button>
+          <button
+            onClick={() => onSelectSubTab('subcontracting')}
+            className="px-3 py-2 border-b-2 border-slate-900 dark:border-white text-slate-900 dark:text-white font-semibold transition-colors whitespace-nowrap"
+          >
+            Subcontracting Operations ({subcontractOrders.length})
+          </button>
+        </div>
+
+        <SubcontractingView
+          orders={subcontractOrders}
+          suppliers={suppliers}
+          productionOrders={orders}
+          onCreateOrder={onCreateSubcontractOrder || (() => {})}
+          onReceiveOrder={onReceiveSubcontractOrder || (() => {})}
+        />
       </div>
     );
   }
@@ -362,6 +437,16 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
         <button
           onClick={(e) => {
             e.stopPropagation();
+            setTravelerOrder(row);
+          }}
+          className="p-1 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+          title="Print / View Production Traveler (Oracle Ref B)"
+        >
+          <FileText className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
             onSelectOrder(row.id);
           }}
           className="p-1 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
@@ -370,7 +455,7 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
           <ChevronRight className="w-4 h-4" />
         </button>
       </div>
-    ), { width: 130 }),
+    ), { width: 140 }),
   ];
 
   // Bulk Actions for MOs
@@ -453,6 +538,16 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
           }`}
         >
           Shop Floor Terminal Kiosk
+        </button>
+        <button
+          onClick={() => onSelectSubTab('subcontracting')}
+          className={`px-3 py-2 border-b-2 transition-colors whitespace-nowrap ${
+            activeSubTab === 'subcontracting'
+              ? 'border-slate-900 dark:border-white text-slate-900 dark:text-white font-semibold'
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+          }`}
+        >
+          Subcontracting Operations ({subcontractOrders.length})
         </button>
       </div>
 
@@ -580,6 +675,13 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {travelerOrder && (
+        <ProductionTravelerModal
+          order={travelerOrder}
+          onClose={() => setTravelerOrder(null)}
+        />
       )}
     </div>
   );

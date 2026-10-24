@@ -95,6 +95,7 @@ const NAV_ITEMS: NavItem[] = [
       { id: 'gantt', label: 'Gantt Schedule & Dependencies' },
       { id: 'work-orders', label: 'Work Orders Dispatch' },
       { id: 'shop-floor', label: 'Shop Floor Terminal Kiosk' },
+      { id: 'subcontracting', label: 'Subcontracting (Section 24)' },
     ],
   },
   {
@@ -155,8 +156,14 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     id: 'admin',
-    label: 'Governance & Audit',
+    label: 'Governance & Config',
     icon: Lock,
+    subItems: [
+      { id: 'audit', label: 'Immutable Audit Trail' },
+      { id: 'platform', label: 'Configuration Platform' },
+      { id: 'registry', label: 'Master Feature Registry' },
+      { id: 'sod', label: 'Segregation of Duties (SoD)' },
+    ],
   },
   {
     id: 'testing',
@@ -165,8 +172,12 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     id: 'learn',
-    label: 'Panduan Alur ERP',
+    label: 'Blueprint & Panduan',
     icon: GraduationCap,
+    subItems: [
+      { id: 'architecture', label: 'Phase 0 Blueprint & Maps' },
+      { id: 'guide', label: 'Workflow Walkthrough' },
+    ],
   },
 ];
 

@@ -27,6 +27,12 @@ import {
   PurchaseOrder,
   GoodsReceiptNote,
   StockBucket,
+  FeatureRegistryItem,
+  FeatureStatus,
+  CustomFieldDefinition,
+  WorkflowDefinition,
+  BusinessRule,
+  SubcontractOrder,
 } from '../../types';
 import {
   INITIAL_PRODUCTS,
@@ -49,10 +55,15 @@ import {
   INITIAL_PURCHASE_REQUISITIONS,
   INITIAL_PURCHASE_ORDERS,
   INITIAL_GOODS_RECEIPTS,
+  INITIAL_FEATURE_REGISTRY,
+  INITIAL_CUSTOM_FIELDS,
+  INITIAL_WORKFLOWS,
+  INITIAL_BUSINESS_RULES,
+  INITIAL_SUBCONTRACT_ORDERS,
 } from '../mockData';
 import { runMRPCalculation } from '../calculations/mrpCalculator';
 
-const STORAGE_KEY = 'kranex_mfg_erp_pdf_spec_v3';
+const STORAGE_KEY = 'kranex_mfg_erp_platform_v4';
 
 export interface ErpState {
   products: Product[];
@@ -75,6 +86,12 @@ export interface ErpState {
   purchaseRequisitions: PurchaseRequisition[];
   purchaseOrders: PurchaseOrder[];
   goodsReceiptNotes: GoodsReceiptNote[];
+  featureRegistry: FeatureRegistryItem[];
+  customFields: CustomFieldDefinition[];
+  workflows: WorkflowDefinition[];
+  businessRules: BusinessRule[];
+  subcontractOrders: SubcontractOrder[];
+  customValues: Record<string, Record<string, any>>;
   selectedPlant: string;
   activeOrderFilter: string;
   currentUser: { name: string; role: string; id: string };
@@ -92,6 +109,15 @@ const getInitialState = (): ErpState => {
         purchaseRequisitions: parsed.purchaseRequisitions?.length ? parsed.purchaseRequisitions : INITIAL_PURCHASE_REQUISITIONS,
         purchaseOrders: parsed.purchaseOrders?.length ? parsed.purchaseOrders : INITIAL_PURCHASE_ORDERS,
         goodsReceiptNotes: parsed.goodsReceiptNotes?.length ? parsed.goodsReceiptNotes : INITIAL_GOODS_RECEIPTS,
+        featureRegistry: parsed.featureRegistry?.length ? parsed.featureRegistry : INITIAL_FEATURE_REGISTRY,
+        customFields: parsed.customFields?.length ? parsed.customFields : INITIAL_CUSTOM_FIELDS,
+        workflows: parsed.workflows?.length ? parsed.workflows : INITIAL_WORKFLOWS,
+        businessRules: parsed.businessRules?.length ? parsed.businessRules : INITIAL_BUSINESS_RULES,
+        subcontractOrders: parsed.subcontractOrders?.length ? parsed.subcontractOrders : INITIAL_SUBCONTRACT_ORDERS,
+        customValues: parsed.customValues || {
+          'prd-001': { materialGrade: 'AISI 304 / AL 6061', thicknessMm: 2.5, rohsCompliant: true, drawingNumber: 'DWG-KRX-2026-08' },
+          'mo-124': { customerProject: 'PRJ-AEROSPACE-90', priorityReason: 'Standard Schedule', targetProductionLine: 'Cell A - High Precision' },
+        },
         selectedPlant: 'PLANT-01',
         activeOrderFilter: 'ALL',
         currentUser: parsed.currentUser || { id: 'usr-001', name: 'Dewi Lestari', role: 'PPIC Supervisor' },
@@ -121,6 +147,15 @@ const getInitialState = (): ErpState => {
     purchaseRequisitions: INITIAL_PURCHASE_REQUISITIONS,
     purchaseOrders: INITIAL_PURCHASE_ORDERS,
     goodsReceiptNotes: INITIAL_GOODS_RECEIPTS,
+    featureRegistry: INITIAL_FEATURE_REGISTRY,
+    customFields: INITIAL_CUSTOM_FIELDS,
+    workflows: INITIAL_WORKFLOWS,
+    businessRules: INITIAL_BUSINESS_RULES,
+    subcontractOrders: INITIAL_SUBCONTRACT_ORDERS,
+    customValues: {
+      'prd-001': { materialGrade: 'AISI 304 / AL 6061', thicknessMm: 2.5, rohsCompliant: true, drawingNumber: 'DWG-KRX-2026-08' },
+      'mo-124': { customerProject: 'PRJ-AEROSPACE-90', priorityReason: 'Standard Schedule', targetProductionLine: 'Cell A - High Precision' },
+    },
     selectedPlant: 'PLANT-01',
     activeOrderFilter: 'ALL',
     currentUser: { id: 'usr-001', name: 'Dewi Lestari', role: 'PPIC Supervisor' },
@@ -1411,6 +1446,148 @@ export function useErpStore() {
     [addNotification]
   );
 
+  // 20. Update Feature Registry Status (Section 42 & 43)
+  const updateFeatureStatus = useCallback(
+    (featureId: string, status: FeatureStatus, notes?: string) => {
+      setState((prev) => ({
+        ...prev,
+        featureRegistry: prev.featureRegistry.map((item) =>
+          item.id === featureId
+            ? { ...item, status, notes: notes !== undefined ? notes : item.notes }
+            : item
+        ),
+      }));
+      addNotification('info', `Feature status updated to ${status}`);
+    },
+    [addNotification]
+  );
+
+  // 21. Custom Field Management (Section 33)
+  const addCustomField = useCallback(
+    (field: Omit<CustomFieldDefinition, 'id'>) => {
+      const newField: CustomFieldDefinition = {
+        ...field,
+        id: `cf-${Date.now()}`,
+      };
+      setState((prev) => ({
+        ...prev,
+        customFields: [...prev.customFields, newField],
+      }));
+      addNotification('success', `Added custom field: ${field.label} (${field.entityType})`);
+      return newField;
+    },
+    [addNotification]
+  );
+
+  const toggleCustomField = useCallback(
+    (fieldId: string) => {
+      setState((prev) => ({
+        ...prev,
+        customFields: prev.customFields.map((f) =>
+          f.id === fieldId ? { ...f, active: !f.active } : f
+        ),
+      }));
+      addNotification('info', 'Custom field status updated.');
+    },
+    [addNotification]
+  );
+
+  const setCustomFieldValue = useCallback(
+    (entityId: string, fieldKey: string, value: any) => {
+      setState((prev) => ({
+        ...prev,
+        customValues: {
+          ...prev.customValues,
+          [entityId]: {
+            ...(prev.customValues[entityId] || {}),
+            [fieldKey]: value,
+          },
+        },
+      }));
+    },
+    []
+  );
+
+  // 22. Dynamic Workflow Engine (Section 34)
+  const addWorkflow = useCallback(
+    (workflow: WorkflowDefinition) => {
+      setState((prev) => ({
+        ...prev,
+        workflows: [...prev.workflows, workflow],
+      }));
+      addNotification('success', `Added workflow definition: ${workflow.name}`);
+    },
+    [addNotification]
+  );
+
+  const updateWorkflow = useCallback(
+    (updated: WorkflowDefinition) => {
+      setState((prev) => ({
+        ...prev,
+        workflows: prev.workflows.map((w) => (w.id === updated.id ? updated : w)),
+      }));
+      addNotification('info', `Updated workflow definition: ${updated.name}`);
+    },
+    [addNotification]
+  );
+
+  // 23. Configurable Business Rules (Section 35)
+  const toggleBusinessRule = useCallback(
+    (ruleId: string) => {
+      setState((prev) => ({
+        ...prev,
+        businessRules: prev.businessRules.map((r) =>
+          r.id === ruleId ? { ...r, enabled: !r.enabled } : r
+        ),
+      }));
+      addNotification('info', 'Business rule state toggled.');
+    },
+    [addNotification]
+  );
+
+  // 24. Subcontracting Operations (Section 24)
+  const createSubcontractOrder = useCallback(
+    (orderData: Omit<SubcontractOrder, 'id'>) => {
+      const newOrder: SubcontractOrder = {
+        ...orderData,
+        id: `subc-${Date.now()}`,
+      };
+      setState((prev) => ({
+        ...prev,
+        subcontractOrders: [newOrder, ...prev.subcontractOrders],
+      }));
+      addNotification('success', `Created subcontract dispatch order: ${newOrder.orderNo}`);
+      return newOrder;
+    },
+    [addNotification]
+  );
+
+  const receiveSubcontractOrder = useCallback(
+    (orderId: string, receivedQty: number) => {
+      setState((prev) => ({
+        ...prev,
+        subcontractOrders: prev.subcontractOrders.map((o) => {
+          if (o.id === orderId) {
+            const newTotalReceived = o.receivedQuantity + receivedQty;
+            const newStatus =
+              newTotalReceived >= o.targetQuantity
+                ? ('COMPLETED' as const)
+                : ('PARTIALLY_RECEIVED' as const);
+            return {
+              ...o,
+              receivedQuantity: newTotalReceived,
+              status: newStatus,
+              actualReturnDate: newTotalReceived >= o.targetQuantity ? new Date().toISOString().split('T')[0] : o.actualReturnDate,
+            };
+          }
+          return o;
+        }),
+      }));
+      addNotification('success', `Received ${receivedQty} units from subcontract supplier.`);
+    },
+    [addNotification]
+  );
+
   // Reset to initial baseline
   const resetDemoState = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
@@ -1446,5 +1623,15 @@ export function useErpStore() {
     releaseQcInspection,
     issueMaterialToProduction,
     switchCurrentUser,
+    // Configurable Platform & Registry
+    updateFeatureStatus,
+    addCustomField,
+    toggleCustomField,
+    setCustomFieldValue,
+    addWorkflow,
+    updateWorkflow,
+    toggleBusinessRule,
+    createSubcontractOrder,
+    receiveSubcontractOrder,
   };
 }

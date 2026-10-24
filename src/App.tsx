@@ -46,6 +46,15 @@ export default function App() {
     releaseQcInspection,
     issueMaterialToProduction,
     switchCurrentUser,
+    updateFeatureStatus,
+    addCustomField,
+    toggleCustomField,
+    setCustomFieldValue,
+    addWorkflow,
+    updateWorkflow,
+    toggleBusinessRule,
+    createSubcontractOrder,
+    receiveSubcontractOrder,
   } = useErpStore();
 
   const [activeNav, setActiveNav] = useState<MainNavId>('dashboard');
@@ -91,6 +100,8 @@ export default function App() {
       else if (nav === 'capacity') setActiveSubTab('capacity-load');
       else if (nav === 'costing') setActiveSubTab('product-cost');
       else if (nav === 'reports') setActiveSubTab('rep-production');
+      else if (nav === 'admin') setActiveSubTab('audit');
+      else if (nav === 'learn') setActiveSubTab('architecture');
     }
   };
 
@@ -237,6 +248,10 @@ export default function App() {
               onCompleteOperation={completeWorkOrder}
               onCloseOrder={closeProductionOrder}
               onCreateOrder={createProductionOrder}
+              subcontractOrders={state.subcontractOrders}
+              suppliers={state.suppliers}
+              onCreateSubcontractOrder={createSubcontractOrder}
+              onReceiveSubcontractOrder={receiveSubcontractOrder}
             />
           )}
 
@@ -303,7 +318,24 @@ export default function App() {
           )}
 
           {activeNav === 'admin' && (
-            <AuditGovernanceView auditLogs={state.auditLogs} />
+            <AuditGovernanceView
+              auditLogs={state.auditLogs}
+              activeSubTab={activeSubTab}
+              onSelectSubTab={setActiveSubTab}
+              featureRegistry={state.featureRegistry}
+              onUpdateFeatureStatus={updateFeatureStatus}
+              customFields={state.customFields}
+              onAddCustomField={addCustomField}
+              onToggleCustomField={toggleCustomField}
+              customValues={state.customValues}
+              onSetCustomFieldValue={setCustomFieldValue}
+              workflows={state.workflows}
+              onUpdateWorkflow={updateWorkflow}
+              businessRules={state.businessRules}
+              onToggleBusinessRule={toggleBusinessRule}
+              currentUser={state.currentUser}
+              onSwitchUser={switchCurrentUser}
+            />
           )}
 
           {activeNav === 'testing' && (
@@ -316,6 +348,8 @@ export default function App() {
 
           {activeNav === 'learn' && (
             <ManufacturingWorkflowGuide
+              activeSubTab={activeSubTab}
+              onSelectSubTab={setActiveSubTab}
               onNavigateToNav={handleSelectNav}
               onResetDemo={resetDemoState}
             />

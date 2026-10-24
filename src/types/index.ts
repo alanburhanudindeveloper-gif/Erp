@@ -637,3 +637,116 @@ export interface TestingScenario {
   status: 'PASSED' | 'PENDING' | 'RUNNING';
   lastRunDetails?: string;
 }
+
+// ============================================================================
+// CONFIGURABLE PLATFORM & MASTER FEATURE REGISTRY TYPES (Sections 32-35, 42-43)
+// ============================================================================
+
+export type FeaturePhase =
+  | 'PHASE_0'
+  | 'PHASE_1'
+  | 'PHASE_2'
+  | 'PHASE_3'
+  | 'PHASE_4'
+  | 'PHASE_5'
+  | 'PHASE_6'
+  | 'PHASE_7';
+
+export type FeatureStatus =
+  | 'PLANNED'
+  | 'IN_PROGRESS'
+  | 'IMPLEMENTED'
+  | 'TESTED'
+  | 'PRODUCTION_READY';
+
+export type FeatureCategory = 'CORE' | 'ADVANCED' | 'OPTIONAL' | 'CONFIGURABLE' | 'AI';
+
+export interface FeatureRegistryItem {
+  id: string;
+  code: string;
+  phase: FeaturePhase;
+  phaseName: string;
+  category: FeatureCategory;
+  module: string;
+  title: string;
+  description: string;
+  status: FeatureStatus;
+  dependencies: string[];
+  targetRelease: string;
+  notes?: string;
+}
+
+export type CustomFieldEntityType = 'PRODUCT' | 'WORK_ORDER' | 'QUALITY_INSPECTION' | 'WORK_CENTER';
+export type CustomFieldDataType = 'TEXT' | 'NUMBER' | 'SELECT' | 'BOOLEAN' | 'DATE';
+
+export interface CustomFieldDefinition {
+  id: string;
+  entityType: CustomFieldEntityType;
+  fieldKey: string;
+  label: string;
+  dataType: CustomFieldDataType;
+  options?: string[];
+  required: boolean;
+  defaultValue?: any;
+  description?: string;
+  active: boolean;
+}
+
+export interface WorkflowState {
+  id: string;
+  code: string;
+  label: string;
+  isInitial: boolean;
+  isTerminal: boolean;
+  color: string;
+}
+
+export interface WorkflowTransition {
+  id: string;
+  fromState: string;
+  toState: string;
+  actionLabel: string;
+  requiredRole: string;
+  condition?: string;
+  requiresReason: boolean;
+}
+
+export interface WorkflowDefinition {
+  id: string;
+  code: string;
+  entityType: 'PRODUCTION_ORDER' | 'PURCHASE_REQUISITION' | 'QUALITY_INSPECTION';
+  name: string;
+  description: string;
+  active: boolean;
+  states: WorkflowState[];
+  transitions: WorkflowTransition[];
+}
+
+export interface BusinessRule {
+  id: string;
+  code: string;
+  name: string;
+  triggerEvent: 'BEFORE_MO_RELEASE' | 'BEFORE_PO_APPROVAL' | 'ON_SCRAP_REPORT' | 'ON_MATERIAL_ISSUE';
+  conditionExpression: string;
+  actionType: 'BLOCK_WITH_ERROR' | 'REQUIRE_SUPERVISOR_APPROVAL' | 'CREATE_WARNING' | 'TRIGGER_NOTIFICATION';
+  actionMessage: string;
+  enabled: boolean;
+}
+
+export interface SubcontractOrder {
+  id: string;
+  orderNo: string;
+  operationRef: string;
+  productionOrderNo: string;
+  supplierId: string;
+  supplierName: string;
+  materialSent: { sku: string; name: string; quantity: number; uom: string; sentDate: string }[];
+  targetQuantity: number;
+  receivedQuantity: number;
+  unitCost: number;
+  totalCost: number;
+  status: 'DRAFT' | 'MATERIAL_SENT' | 'IN_PROCESSING' | 'PARTIALLY_RECEIVED' | 'COMPLETED';
+  sentDate: string;
+  expectedReturnDate: string;
+  actualReturnDate?: string;
+}
