@@ -21,10 +21,14 @@ import {
   PanelLeftOpen,
   Calendar,
   ShoppingCart,
+  Rocket,
+  Compass,
 } from 'lucide-react';
 
 export type MainNavId =
   | 'dashboard'
+  | 'npi'
+  | 'engineering'
   | 'master-data'
   | 'planning'
   | 'procurement'
@@ -53,6 +57,32 @@ const NAV_ITEMS: NavItem[] = [
     icon: LayoutDashboard,
   },
   {
+    id: 'npi',
+    label: 'NPI & Readiness',
+    icon: Rocket,
+    subItems: [
+      { id: 'dashboard', label: 'NPI Stage-Gate Radar' },
+      { id: 'projects', label: 'NPI Projects & Milestones' },
+      { id: 'readiness', label: '6-Pillar Line Readiness' },
+      { id: 'trials', label: 'Trial & Pilot Runs' },
+      { id: 'release-package', label: 'Product Release Packages' },
+    ],
+  },
+  {
+    id: 'engineering',
+    label: 'Engineering Hub',
+    icon: Compass,
+    subItems: [
+      { id: 'drawings', label: 'CAD Drawings & Blueprints' },
+      { id: 'specifications', label: 'Engineering Specifications' },
+      { id: 'tooling', label: 'Tooling Master (Molds/Jigs)' },
+      { id: 'work-instructions', label: 'Work Instructions (WI/SOP)' },
+      { id: 'qc-plans', label: 'Quality Control Plans (QCP)' },
+      { id: 'cycle-times', label: 'Cycle Time Engine' },
+      { id: 'ecr', label: 'Engineering Changes (ECR)' },
+    ],
+  },
+  {
     id: 'master-data',
     label: 'Master Data',
     icon: Database,
@@ -67,12 +97,19 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     id: 'planning',
-    label: 'Planning',
+    label: 'Planning & PPIC',
     icon: CalendarRange,
     subItems: [
+      { id: 'ppic-dashboard', label: 'PPIC Dashboard' },
       { id: 'demand', label: 'Demand (MTO / MTS)' },
-      { id: 'mps', label: 'Master Schedule (MPS)' },
-      { id: 'mrp', label: 'MRP Calculation Engine' },
+      { id: 'production-plan', label: 'Production Plan (MPS)' },
+      { id: 'material-planning', label: 'Multi-Level BOM & MRP' },
+      { id: 'capacity-planning', label: 'Capacity (Machine & Labor)' },
+      { id: 'scheduling', label: 'Finite Production Scheduling' },
+      { id: 'gantt', label: 'Gantt Dispatch Timeline' },
+      { id: 'bottleneck', label: 'Bottleneck Analysis' },
+      { id: 'what-if', label: 'What-If Simulation' },
+      { id: 'e2e-demo', label: 'Section 41 E2E Test Case' },
     ],
   },
   {
@@ -92,6 +129,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: Factory,
     subItems: [
       { id: 'production-orders', label: 'Production Orders (MO)' },
+      { id: 'material-requests', label: 'Material Requests & Line' },
       { id: 'gantt', label: 'Gantt Schedule & Dependencies' },
       { id: 'work-orders', label: 'Work Orders Dispatch' },
       { id: 'shop-floor', label: 'Shop Floor Terminal Kiosk' },

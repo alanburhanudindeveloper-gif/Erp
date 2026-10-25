@@ -17,6 +17,7 @@ import { ShopFloorTerminal } from './ShopFloorTerminal';
 import { ManufacturingGanttChart } from './ManufacturingGanttChart';
 import { SubcontractingView } from './SubcontractingView';
 import { ProductionTravelerModal } from './ProductionTravelerModal';
+import { MaterialRequestView } from './MaterialRequestView';
 import {
   EnterpriseDataGrid,
   GridColumn,
@@ -113,6 +114,12 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
             className="px-3 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors whitespace-nowrap"
           >
             Production Orders (MO) ({orders.length})
+          </button>
+          <button
+            onClick={() => onSelectSubTab('material-requests')}
+            className="px-3 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors whitespace-nowrap"
+          >
+            Material Requests & Line Delivery
           </button>
           <button
             onClick={() => onSelectSubTab('gantt')}
@@ -315,6 +322,12 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
             Production Orders (MO) ({orders.length})
           </button>
           <button
+            onClick={() => onSelectSubTab('material-requests')}
+            className="px-3 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors whitespace-nowrap"
+          >
+            Material Requests & Line Delivery
+          </button>
+          <button
             onClick={() => onSelectSubTab('gantt')}
             className="px-3 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors whitespace-nowrap"
           >
@@ -347,6 +360,55 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
           onCreateOrder={onCreateSubcontractOrder || (() => {})}
           onReceiveOrder={onReceiveSubcontractOrder || (() => {})}
         />
+      </div>
+    );
+  }
+
+  // Material Requests & Line Delivery tab (Section 14 & 15)
+  if (activeSubTab === 'material-requests') {
+    return (
+      <div className="space-y-4">
+        {/* Sub-tab Navigation */}
+        <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-800 overflow-x-auto text-xs font-medium">
+          <button
+            onClick={() => onSelectSubTab('production-orders')}
+            className="px-3 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors whitespace-nowrap"
+          >
+            Production Orders (MO) ({orders.length})
+          </button>
+          <button
+            onClick={() => onSelectSubTab('material-requests')}
+            className="px-3 py-2 border-b-2 border-slate-900 dark:border-white text-slate-900 dark:text-white font-semibold transition-colors whitespace-nowrap"
+          >
+            Material Requests & Line Delivery
+          </button>
+          <button
+            onClick={() => onSelectSubTab('gantt')}
+            className="px-3 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors whitespace-nowrap"
+          >
+            Gantt Schedule & Dependencies
+          </button>
+          <button
+            onClick={() => onSelectSubTab('work-orders')}
+            className="px-3 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors whitespace-nowrap"
+          >
+            Work Orders Dispatch
+          </button>
+          <button
+            onClick={() => onSelectSubTab('shop-floor')}
+            className="px-3 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors whitespace-nowrap"
+          >
+            Shop Floor Terminal Kiosk
+          </button>
+          <button
+            onClick={() => onSelectSubTab('subcontracting')}
+            className="px-3 py-2 border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors whitespace-nowrap"
+          >
+            Subcontracting Operations ({subcontractOrders.length})
+          </button>
+        </div>
+
+        <MaterialRequestView />
       </div>
     );
   }
@@ -508,6 +570,16 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
           }`}
         >
           Production Orders (MO) ({orders.length})
+        </button>
+        <button
+          onClick={() => onSelectSubTab('material-requests')}
+          className={`px-3 py-2 border-b-2 transition-colors whitespace-nowrap ${
+            activeSubTab === 'material-requests'
+              ? 'border-slate-900 dark:border-white text-slate-900 dark:text-white font-semibold'
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+          }`}
+        >
+          Material Requests & Line Delivery
         </button>
         <button
           onClick={() => onSelectSubTab('gantt')}

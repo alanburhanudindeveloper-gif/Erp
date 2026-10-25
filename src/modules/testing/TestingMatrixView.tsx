@@ -47,7 +47,9 @@ const DOD_ITEMS = [
   'Purchase Requisition (PR) tiered threshold approvals (<10M Supervisor, 10-100M Plant Mgr, >100M Director).',
   'Segregation of Duties (BR-PRC-002): Pembuat PR dilarang self-approve transaksinya sendiri.',
   'Inbound Receiving (GRN) auto-routes material dengan incoming QC ke bucket HOLD / QUARANTINE.',
-  'Material dengan status HOLD dilarang dikeluarkan ke lantai produksi (BR-INV-003).',
+  'NPI Release Gate (BR-NPI-001): Produk dalam tahap NPI (DRAFT/PILOT) dilarang diterbitkan MO normal komersial sebelum lolos 6 pilar readiness dan Product Release Package diterbitkan.',
+  'Engineering Change Isolation (BR-ECR-002): Order produksi berjalan mengisolasi revision snapshot asli (Rev A) dan tidak termutasi otomatis saat ECR Rev B dirilis, kecuali di-authorize secara eksplisit.',
+  'Finite Capacity & Multi-Level BOM Scheduling (Section 41 & 46): Output Rate = 1/CT, M01 gross 2,880 pcs/day, effective 2,448 pcs/day; COMP-A 1,000 pcs shortage exception flagged; 6 operators required vs 4 available detected; non-overlapping sequence slots with changeover matrix enforcement.',
 ];
 
 interface TraceabilityItem {
@@ -167,6 +169,33 @@ const TRACEABILITY_DATA: TraceabilityItem[] = [
     businessRule: 'BR-QA-002 / BR-006',
     acceptanceCriteria: 'AC-QA-002 (Hold Quarantine & NCR)',
     automatedTestCase: 'tc-stock-hold-quarantine',
+    status: 'PASS',
+  },
+  {
+    id: 'tr-13',
+    useCase: 'UC-NPI-001 (Production Release Gate)',
+    requirement: 'FR-NPI-001-005',
+    businessRule: 'BR-NPI-001',
+    acceptanceCriteria: 'AC-NPI-001 (Prevent MO on Unreleased Product)',
+    automatedTestCase: 'tc-npi-release-gate-validation',
+    status: 'PASS',
+  },
+  {
+    id: 'tr-14',
+    useCase: 'UC-ENG-002 (ECR Historical Isolation)',
+    requirement: 'FR-ECR-001-003',
+    businessRule: 'BR-ECR-002',
+    acceptanceCriteria: 'AC-ECR-002 (Preserve In-Flight MO Snapshot)',
+    automatedTestCase: 'tc-ecr-historical-isolation',
+    status: 'PASS',
+  },
+  {
+    id: 'tr-15',
+    useCase: 'UC-PPIC-001 (Finite Capacity Scheduling & BOM Explosion)',
+    requirement: 'FR-PPIC-001-046',
+    businessRule: 'BR-PPIC-001 (Rule 1 & Rule 10)',
+    acceptanceCriteria: 'AC-PPIC-001 (5-Pillar Constraint & Snapshot Preservation)',
+    automatedTestCase: 'tc-ppic-section-41-simulation',
     status: 'PASS',
   },
 ];

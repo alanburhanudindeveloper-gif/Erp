@@ -17,6 +17,8 @@ import { AuditGovernanceView } from './modules/admin/AuditGovernanceView';
 import { TestingMatrixView } from './modules/testing/TestingMatrixView';
 import { ManufacturingWorkflowGuide } from './modules/learn/ManufacturingWorkflowGuide';
 import { ProcurementView } from './modules/procurement/ProcurementView';
+import { NpiView } from './modules/npi/NpiView';
+import { EngineeringHubView } from './modules/engineering/EngineeringHubView';
 import { AiBudgetTelemetryModal } from './components/ai/AiBudgetTelemetryModal';
 import { Bell, X } from 'lucide-react';
 
@@ -91,8 +93,10 @@ export default function App() {
     if (subTab) {
       setActiveSubTab(subTab);
     } else {
-      if (nav === 'master-data') setActiveSubTab('products');
-      else if (nav === 'planning') setActiveSubTab('demand');
+      if (nav === 'npi') setActiveSubTab('dashboard');
+      else if (nav === 'engineering') setActiveSubTab('drawings');
+      else if (nav === 'master-data') setActiveSubTab('products');
+      else if (nav === 'planning') setActiveSubTab('ppic-dashboard');
       else if (nav === 'procurement') setActiveSubTab('pr');
       else if (nav === 'manufacturing') setActiveSubTab('production-orders');
       else if (nav === 'inventory') setActiveSubTab('material-availability');
@@ -112,6 +116,10 @@ export default function App() {
   const currentModuleTitle =
     activeNav === 'dashboard'
       ? 'Dashboard'
+      : activeNav === 'npi'
+      ? 'NPI & Production Readiness'
+      : activeNav === 'engineering'
+      ? 'Engineering Hub & ECR'
       : activeNav === 'master-data'
       ? 'Master Data'
       : activeNav === 'planning'
@@ -185,6 +193,17 @@ export default function App() {
               onOpenGuide={() => handleSelectNav('learn')}
               onOpenAiBudget={() => setShowAiBudgetModal(true)}
             />
+          )}
+
+          {activeNav === 'npi' && (
+            <NpiView
+              initialSubTab={activeSubTab}
+              onNavigateToProductionOrder={() => handleSelectNav('manufacturing', 'production-orders')}
+            />
+          )}
+
+          {activeNav === 'engineering' && (
+            <EngineeringHubView initialSubTab={activeSubTab} />
           )}
 
           {activeNav === 'master-data' && (

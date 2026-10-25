@@ -2,6 +2,16 @@ export type ProductType = 'FINISHED_GOOD' | 'SUB_ASSEMBLY' | 'RAW_MATERIAL' | 'C
 
 export type UomCode = 'PCS' | 'KG' | 'MTR' | 'LTR' | 'SET' | 'BOX' | 'ROLL';
 
+export type ProductLifecycleStatus =
+  | 'DRAFT'
+  | 'DEVELOPMENT'
+  | 'PROTOTYPE'
+  | 'TRIAL'
+  | 'PILOT'
+  | 'RELEASED'
+  | 'ON_HOLD'
+  | 'OBSOLETE';
+
 export interface Product {
   id: string;
   sku: string;
@@ -21,6 +31,15 @@ export interface Product {
   allocatedStock: number;
   onOrderStock: number;
   status: 'ACTIVE' | 'INACTIVE';
+  lifecycleStatus?: ProductLifecycleStatus;
+  currentRevision?: string;
+  drawingNumber?: string;
+  drawingRevision?: string;
+  specificationNumber?: string;
+  specificationRevision?: string;
+  customer?: string;
+  effectiveDate?: string;
+  obsoleteDate?: string;
   bomId?: string;
   routingId?: string;
   description: string;
@@ -101,6 +120,13 @@ export interface RoutingOperation {
   description?: string;
   laborHourlyRate: number;
   machineHourlyRate: number;
+  cycleTimeSeconds?: number;
+  cycleTimeUom?: 'SECONDS_PER_PCS' | 'MINUTES_PER_PCS' | 'HOURS_PER_PCS';
+  manpowerRequired?: number;
+  skillRequired?: string;
+  toolingRequired?: string;
+  yieldPercent?: number;
+  machineCode?: string;
 }
 
 export interface Routing {
@@ -257,6 +283,10 @@ export interface ProductionOrder {
   routingId: string;
   routingCode: string;
   routingRevision: string;
+  productRevision?: string;
+  releasePackageId?: string;
+  wiRevision?: string;
+  toolingRevision?: string;
   plantId: string;
   plantName: string;
   plannedStartDate: string;
@@ -650,7 +680,9 @@ export type FeaturePhase =
   | 'PHASE_4'
   | 'PHASE_5'
   | 'PHASE_6'
-  | 'PHASE_7';
+  | 'PHASE_7'
+  | 'PHASE_8'
+  | 'PHASE_9';
 
 export type FeatureStatus =
   | 'PLANNED'
@@ -750,3 +782,601 @@ export interface SubcontractOrder {
   expectedReturnDate: string;
   actualReturnDate?: string;
 }
+
+// ============================================================================
+// PHASE 8: NPI, PRODUCT RELEASE & ENGINEERING CHANGE DOMAIN (Master Execution)
+// ============================================================================
+
+// 1. ENGINEERING DOCUMENTS (Drawings & Specifications)
+export interface EngineeringDrawing {
+  id: string;
+  drawingNumber: string; // e.g. DWG-ABC-100-A
+  revision: string; // Rev A, Rev B
+  productId: string;
+  productSku: string;
+  title: string;
+  fileReference?: string;
+  cadModelType?: '2D_DWG' | '3D_STEP' | 'PDF_SCHEMATIC';
+  description: string;
+  status: 'DRAFT' | 'REVIEW' | 'APPROVED' | 'RELEASED' | 'OBSOLETE';
+  createdBy: string;
+  createdDate: string;
+  approvedBy?: string;
+  approvalDate?: string;
+  effectiveDate?: string;
+}
+
+export interface EngineeringSpecification {
+  id: string;
+  specNumber: string; // e.g. SPEC-ABC-100-A
+  revision: string;
+  productId: string;
+  productSku: string;
+  title: string;
+  content: string;
+  criticalParameters: { parameter: string; nominal: string; tolerance: string }[];
+  status: 'DRAFT' | 'REVIEW' | 'APPROVED' | 'RELEASED' | 'OBSOLETE';
+  approvedBy?: string;
+  approvalDate?: string;
+  effectiveDate?: string;
+}
+
+// 2. TOOLING DOMAIN
+export type ToolType = 'MOLD' | 'JIG' | 'FIXTURE' | 'DIE' | 'CUTTING_TOOL' | 'SPECIAL_SETUP';
+export type ToolStatus =
+  | 'DESIGN'
+  | 'FABRICATION'
+  | 'INSPECTION'
+  | 'QUALIFICATION'
+  | 'READY'
+  | 'IN_USE'
+  | 'MAINTENANCE'
+  | 'RETIRED';
+
+export interface ToolingItem {
+  id: string;
+  toolId: string; // e.g. TOOL-MOLD-001
+  name: string;
+  type: ToolType;
+  productId: string;
+  productSku: string;
+  revision: string;
+  status: ToolStatus;
+  location: string;
+  owner: string;
+  supplier?: string;
+  drawingRef?: string;
+  capacityPerShift: number;
+  expectedLifeShots: number;
+  currentShots: number;
+  qualifiedBy?: string;
+  qualificationDate?: string;
+  maintenanceIntervalShots: number;
+  approvedBy?: string;
+  effectiveDate?: string;
+  notes?: string;
+}
+
+// 3. WORK INSTRUCTIONS (WI)
+export interface WorkInstruction {
+  id: string;
+  wiNumber: string; // e.g. WI-ABC-100-OP10
+  revision: string;
+  productId: string;
+  productSku: string;
+  productRevision: string;
+  routingOperationId?: string;
+  operationSeq: number;
+  operationName: string;
+  workCenterId: string;
+  workCenterName: string;
+  title: string;
+  instructions: string[];
+  safetyNotes: string[];
+  qualityCheckpoints: string[];
+  requiredTools: string[];
+  requiredMaterials: string[];
+  status: 'DRAFT' | 'REVIEW' | 'APPROVED' | 'RELEASED' | 'OBSOLETE';
+  approvedBy?: string;
+  approvalDate?: string;
+  effectiveDate?: string;
+}
+
+// 4. QUALITY CONTROL PLAN (QC Plan)
+export interface QcInspectionCharacteristic {
+  id: string;
+  characteristic: string;
+  specification: string;
+  targetValue?: number;
+  toleranceMin?: number;
+  toleranceMax?: number;
+  measurementMethod: string;
+  samplingFrequency: string;
+  equipment: string;
+  acceptanceCriteria: string;
+  reactionPlan: string;
+}
+
+export interface QcPlan {
+  id: string;
+  planNumber: string; // e.g. QCP-ABC-100-A
+  revision: string;
+  productId: string;
+  productSku: string;
+  productRevision: string;
+  operationSeq: number;
+  operationName: string;
+  status: 'DRAFT' | 'REVIEW' | 'APPROVED' | 'RELEASED' | 'OBSOLETE';
+  characteristics: QcInspectionCharacteristic[];
+  approvedBy?: string;
+  approvalDate?: string;
+  effectiveDate?: string;
+}
+
+// 5. MATERIAL REQUEST & LINE DELIVERY (NPI & Normal Production)
+export type MaterialRequestStatus =
+  | 'DRAFT'
+  | 'SUBMITTED'
+  | 'APPROVED'
+  | 'PICKING'
+  | 'READY'
+  | 'DELIVERED'
+  | 'ISSUED'
+  | 'CLOSED';
+
+export interface MaterialRequestItem {
+  id: string;
+  productId: string;
+  sku: string;
+  name: string;
+  requestedQuantity: number;
+  pickedQuantity: number;
+  deliveredQuantity: number;
+  uom: UomCode;
+  fromWarehouse: string;
+  toLocation: string; // e.g. Line 1 - Staging Bay
+  status: 'PENDING' | 'PICKED' | 'DELIVERED';
+}
+
+export interface MaterialRequest {
+  id: string;
+  requestNumber: string; // e.g. MR-2026-001
+  sourceType: 'NPI_TRIAL' | 'NPI_PILOT' | 'PRODUCTION_ORDER' | 'MAINTENANCE';
+  sourceReferenceId: string; // NPI-2026-001 or MO-2026-00124
+  productId?: string;
+  productSku?: string;
+  requester: string;
+  department: string;
+  requiredDate: string;
+  destinationLine: string;
+  priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  status: MaterialRequestStatus;
+  items: MaterialRequestItem[];
+  pickedBy?: string;
+  pickedAt?: string;
+  deliveredBy?: string;
+  deliveredAt?: string;
+  receivedBy?: string;
+  receivedAt?: string;
+  notes?: string;
+}
+
+// 6. PRODUCTION READINESS CHECKLIST (6 Pillars)
+export type ReadinessPillar =
+  | 'ENGINEERING'
+  | 'TOOLING'
+  | 'PROCESS'
+  | 'MATERIAL'
+  | 'QUALITY'
+  | 'PEOPLE_PRODUCTION';
+
+export interface ReadinessItem {
+  id: string;
+  pillar: ReadinessPillar;
+  checkItem: string;
+  status: 'READY' | 'NOT_READY' | 'BLOCKED';
+  blockingReason?: string;
+  responsibleRole: string;
+  verifiedBy?: string;
+  verifiedAt?: string;
+}
+
+export interface ProductionReadinessReport {
+  id: string;
+  npiProjectId: string;
+  productSku: string;
+  productRevision: string;
+  targetRunType: 'TRIAL' | 'PILOT' | 'NORMAL_PRODUCTION';
+  overallStatus: 'READY' | 'NOT_READY' | 'BLOCKED';
+  items: ReadinessItem[];
+  blockingIssues: string[];
+  evaluatedAt: string;
+  evaluator: string;
+}
+
+// 7. NPI TRIAL & PILOT RUNS
+export interface NpiTrialRun {
+  id: string;
+  trialNumber: string; // e.g. TRL-2026-001
+  npiProjectId: string;
+  productSku: string;
+  productRevision: string;
+  bomRevision: string;
+  routingRevision: string;
+  wiRevision: string;
+  toolingRevision: string;
+  workCenterId: string;
+  workCenterName: string;
+  plannedQuantity: number;
+  actualQuantity: number;
+  goodQuantity: number;
+  scrapQuantity: number;
+  scrapReason?: string;
+  startTime: string;
+  endTime: string;
+  operators: string[];
+  trialResult: 'PASS' | 'FAIL' | 'PASS_WITH_ACTION';
+  observations: string;
+  correctiveActions?: string;
+  inspector: string;
+}
+
+export interface NpiPilotRun {
+  id: string;
+  pilotNumber: string; // e.g. PLT-2026-001
+  npiProjectId: string;
+  productSku: string;
+  productRevision: string;
+  plannedQuantity: number;
+  actualQuantity: number;
+  yieldPercentage: number;
+  targetCycleTimeSeconds: number;
+  actualCycleTimeSeconds: number;
+  cycleTimeStability: 'STABLE' | 'MODERATE' | 'UNSTABLE';
+  operatorReadiness: 'READY' | 'NEEDS_TRAINING';
+  toolingPerformance: 'OPTIMAL' | 'MINOR_ISSUES' | 'DEFECTIVE';
+  bottlenecksIdentified: string;
+  pilotResult: 'PASS' | 'FAIL' | 'CONDITIONAL';
+  remarks: string;
+  evaluator: string;
+}
+
+// 8. NPI PROJECT
+export type NpiStatus =
+  | 'DRAFT'
+  | 'DEVELOPMENT'
+  | 'PROTOTYPE'
+  | 'TRIAL'
+  | 'PILOT'
+  | 'READY_FOR_RELEASE'
+  | 'RELEASED'
+  | 'BLOCKED';
+
+export interface NpiMilestone {
+  id: string;
+  title: string;
+  targetDate: string;
+  completedDate?: string;
+  status: 'COMPLETED' | 'IN_PROGRESS' | 'PENDING' | 'OVERDUE';
+  responsibleRole: string;
+}
+
+export interface NpiProject {
+  id: string;
+  projectNumber: string; // e.g. NPI-2026-001
+  productId: string;
+  productSku: string;
+  productName: string;
+  productRevision: string;
+  customer: string;
+  projectOwner: string;
+  engineeringOwner: string;
+  ppicRepresentative: string;
+  productionRepresentative: string;
+  qualityRepresentative: string;
+  toolingRepresentative: string;
+  targetReleaseDate: string;
+  actualReleaseDate?: string;
+  status: NpiStatus;
+  priority: 'CRITICAL' | 'HIGH' | 'MEDIUM';
+  milestones: NpiMilestone[];
+  notes: string;
+  blockingIssues: string[];
+  trialRuns: NpiTrialRun[];
+  pilotRuns: NpiPilotRun[];
+}
+
+// 9. PRODUCT RELEASE PACKAGE (Baseline Freeze)
+export interface ReleaseSignOff {
+  role: string;
+  approver: string;
+  approvedAt?: string;
+  status: 'APPROVED' | 'PENDING' | 'REJECTED';
+}
+
+export interface ProductReleasePackage {
+  id: string;
+  packageNumber: string; // e.g. REL-PKG-2026-01
+  productId: string;
+  productSku: string;
+  productName: string;
+  releasedRevision: string; // e.g. Rev A
+  drawingRevision: string;
+  specificationRevision: string;
+  bomRevision: string;
+  routingRevision: string;
+  toolingRevision: string;
+  wiRevision: string;
+  qcPlanRevision: string;
+  effectiveDate: string;
+  releasedBy: string;
+  approvals: ReleaseSignOff[];
+  status: 'ACTIVE' | 'SUPERSEDED';
+  notes: string;
+}
+
+// 10. ENGINEERING CHANGE REQUEST (ECR / ECO)
+export type EcrStatus =
+  | 'DRAFT'
+  | 'IMPACT_ANALYSIS'
+  | 'ENGINEERING_REVIEW'
+  | 'APPROVED'
+  | 'IMPLEMENTATION'
+  | 'EFFECTIVE'
+  | 'CLOSED'
+  | 'REJECTED';
+
+export interface EcrImpactAnalysis {
+  bomImpact: boolean;
+  routingImpact: boolean;
+  wiImpact: boolean;
+  qcImpact: boolean;
+  toolingImpact: boolean;
+  costImpact: boolean;
+  customerApprovalRequired: boolean;
+  estimatedCostDifference: number; // e.g. +12.50
+  affectedOpenWorkOrderIds: string[];
+  inventoryOldMaterialRemaining: { sku: string; name: string; stockQty: number; disposition: 'USE_UP' | 'SCRAP' | 'REWORK' }[];
+  inventoryNewMaterialRequired: { sku: string; name: string; requiredQty: number }[];
+  impactSummary: string;
+}
+
+export interface OpenWorkOrderDecision {
+  workOrderId: string;
+  orderNumber: string;
+  productSku: string;
+  currentRevision: string;
+  progressPercentage: number;
+  decision:
+    | 'CONTINUE_EXISTING_REV'
+    | 'APPLY_NEW_REV'
+    | 'HOLD_WORK_ORDER'
+    | 'CANCEL_AND_RECREATE'
+    | 'ENGINEERING_REVIEW_REQUIRED';
+  authorizedBy?: string;
+  notes?: string;
+}
+
+export interface EngineeringChangeRequest {
+  id: string;
+  ecrNumber: string; // e.g. ECR-2026-004
+  productId: string;
+  productSku: string;
+  productName: string;
+  currentRevision: string; // e.g. Rev A
+  proposedRevision: string; // e.g. Rev B
+  reason: string;
+  requestedBy: string;
+  department: string;
+  priority: 'CRITICAL' | 'HIGH' | 'MEDIUM';
+  status: EcrStatus;
+  targetEffectiveDate: string;
+  impactAnalysis: EcrImpactAnalysis;
+  openWorkOrderDecisions: OpenWorkOrderDecision[];
+  approvals: ReleaseSignOff[];
+  releasedPackageId?: string;
+  createdAt: string;
+  effectiveAt?: string;
+}
+
+// ============================================================================
+// PHASE 9: PPIC PLANNING, FINITE CAPACITY & PRODUCTION SCHEDULING DOMAIN
+// ============================================================================
+
+export type MachineStatus = 'OPERATIONAL' | 'MAINTENANCE' | 'BREAKDOWN' | 'OFFLINE';
+
+export interface MachineMaster {
+  id: string;
+  code: string; // e.g. M01
+  name: string; // Cutting Machine
+  workCenterId: string;
+  workCenterCode: string;
+  department: string;
+  availableUnits: number; // e.g. 3 units
+  standardCycleTimeSeconds: number; // e.g. 30 sec
+  efficiencyRate: number; // e.g. 0.85 (85%)
+  availabilityRate: number; // e.g. 0.95
+  performanceRate: number; // e.g. 0.92
+  qualityRate: number; // e.g. 0.98
+  hourlyCostRate: number;
+  status: MachineStatus;
+  maintenanceSchedule?: {
+    startDate: string;
+    endDate: string;
+    reason: string;
+    blocksCapacity: boolean;
+  }[];
+  notes?: string;
+}
+
+export interface EmployeeSkill {
+  skillName: string;
+  level: 1 | 2 | 3 | 4 | 5; // 1: Novice, 5: Expert
+}
+
+export interface EmployeeManpower {
+  id: string;
+  employeeCode: string; // e.g. EMP-001
+  name: string;
+  role: string;
+  department: string;
+  skills: EmployeeSkill[];
+  qualifiedWorkCenters: string[]; // e.g. ['WC-M01', 'WC-M02']
+  assignedShiftId: string;
+  dailyWorkingHours: number; // e.g. 8
+  overtimeCapable: boolean;
+  maxOvertimeHoursPerWeek: number;
+  status: 'AVAILABLE' | 'ASSIGNED' | 'ON_LEAVE';
+}
+
+export interface ProductionShift {
+  id: string;
+  code: string; // e.g. SHIFT-1
+  name: string; // Shift 1 (Morning)
+  startTime: string; // "07:00"
+  endTime: string; // "15:00"
+  workingHours: number; // 8
+  breakMinutes: number; // 60
+  overtimeHoursAllowed: number;
+  isActive: boolean;
+}
+
+export interface ProductionCalendar {
+  id: string;
+  name: string;
+  plantId: string;
+  workingDays: number[]; // 1: Mon, 2: Tue, ..., 5: Fri
+  shifts: ProductionShift[];
+  holidays: string[]; // YYYY-MM-DD
+  plannedShutdowns: { startDate: string; endDate: string; reason: string }[];
+}
+
+export interface ChangeoverRule {
+  id: string;
+  fromProductSku: string;
+  toProductSku: string;
+  changeoverMinutes: number;
+  cleaningRequired: boolean;
+  toolingChangeRequired: boolean;
+  notes?: string;
+}
+
+export type FeasibilityState =
+  | 'FEASIBLE'
+  | 'PARTIALLY_FEASIBLE'
+  | 'NOT_FEASIBLE'
+  | 'MATERIAL_CONSTRAINED'
+  | 'MACHINE_CAPACITY_SHORTAGE'
+  | 'MANPOWER_SHORTAGE'
+  | 'TOOLING_SHORTAGE'
+  | 'SCHEDULE_CONFLICT';
+
+export interface ProductionPlanItem {
+  id: string;
+  planNumber: string; // e.g. PLAN-2026-W43-01
+  periodWeek: string; // e.g. "Week 43 - Oct 2026"
+  demandRef: string; // e.g. DEM-2026-5001
+  productId: string;
+  productSku: string;
+  productName: string;
+  demandQty: number; // e.g. 5,000 pcs
+  plannedQty: number; // e.g. 5,000 or 3,500 pcs
+  unfulfilledQty: number;
+  feasibility: FeasibilityState;
+  constraintNotes?: string;
+  targetStartDate: string;
+  targetEndDate: string;
+  status: 'DRAFT' | 'ANALYZING' | 'FEASIBILITY_REVIEW' | 'CONFIRMED' | 'DISPATCHED';
+  generatedWorkOrderId?: string;
+}
+
+export interface FiniteScheduledSlot {
+  id: string;
+  scheduleNo: string; // e.g. SCHED-101
+  productionOrderId?: string;
+  orderNumber?: string;
+  demandRef?: string;
+  productId: string;
+  productSku: string;
+  productName: string;
+  targetQty: number;
+  operationSeq: number; // 10, 20, 30
+  operationName: string;
+  workCenterCode: string;
+  machineCode: string; // e.g. M01
+  machineUnitsAllocated: number; // e.g. 3 machines
+  manpowerRequired: number; // e.g. 6 operators
+  manpowerAssigned: string[];
+  toolingRequired?: string;
+  startDateTime: string; // "2026-10-26 07:00"
+  endDateTime: string; // "2026-10-27 15:00"
+  durationMinutes: number;
+  setupMinutes: number;
+  changeoverMinutes: number;
+  processingMinutes: number;
+  expectedOutput: number;
+  status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'CONFLICT' | 'BLOCKED';
+  conflictReason?: string;
+}
+
+export interface WhatIfScenario {
+  id: string;
+  name: string; // e.g. "Scenario B: +1 Machine (3 units)"
+  description: string;
+  targetProductSku: string;
+  targetDemandQty: number;
+  dueDate: string;
+  machineOverrides: { machineCode: string; quantity: number }[];
+  shiftHoursOverride?: number; // e.g. 10 hours (2h overtime)
+  extraShiftActive?: boolean; // e.g. 2 shifts
+  useAlternativeMachine?: boolean;
+  // Computed values
+  computedOutputRatePcsPerHour: number;
+  computedGrossCapacityPerDay: number;
+  computedEffectiveCapacityPerDay: number;
+  computedProductionDurationHours: number;
+  computedCompletionDate: string;
+  computedManpowerRequirement: number;
+  computedManpowerShortage: number;
+  computedMaterialShortages: { sku: string; required: number; shortage: number }[];
+  feasibilityState: FeasibilityState;
+  comparisonVsBaselineDays: number;
+}
+
+export interface BottleneckAnalysisResult {
+  operationSeq: number;
+  operationName: string;
+  workCenterCode: string;
+  workCenterName: string;
+  machineCode: string;
+  cycleTimeSeconds: number;
+  outputRatePerHour: number;
+  dailyCapacityUnits: number;
+  requiredCapacityUnits: number;
+  utilizationPct: number;
+  isBottleneck: boolean;
+  deficitHours: number;
+  recommendation: string;
+}
+
+export interface MultiLevelBomNode {
+  level: number;
+  productId: string;
+  productSku: string;
+  productName: string;
+  type: ProductType;
+  quantityPerUnit: number;
+  totalRequiredQty: number;
+  uom: UomCode;
+  onHandStock: number;
+  allocatedStock: number;
+  availableStock: number;
+  incomingStock: number;
+  safetyStock: number;
+  netRequirement: number;
+  shortageQty: number;
+  status: 'AVAILABLE' | 'PARTIAL' | 'SHORTAGE' | 'DELAYED';
+  children?: MultiLevelBomNode[];
+}
+
+

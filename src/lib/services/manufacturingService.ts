@@ -33,6 +33,33 @@ import {
   WorkflowDefinition,
   BusinessRule,
   SubcontractOrder,
+  EngineeringDrawing,
+  EngineeringSpecification,
+  ToolingItem,
+  WorkInstruction,
+  QcPlan,
+  MaterialRequest,
+  ProductionReadinessReport,
+  NpiProject,
+  NpiStatus,
+  NpiTrialRun,
+  NpiPilotRun,
+  ProductReleasePackage,
+  EngineeringChangeRequest,
+  OpenWorkOrderDecision,
+  ToolStatus,
+  MachineMaster,
+  MachineStatus,
+  EmployeeManpower,
+  ProductionShift,
+  ProductionCalendar,
+  ChangeoverRule,
+  ProductionPlanItem,
+  FiniteScheduledSlot,
+  WhatIfScenario,
+  BottleneckAnalysisResult,
+  MultiLevelBomNode,
+  FeasibilityState,
 } from '../../types';
 import {
   INITIAL_PRODUCTS,
@@ -60,8 +87,38 @@ import {
   INITIAL_WORKFLOWS,
   INITIAL_BUSINESS_RULES,
   INITIAL_SUBCONTRACT_ORDERS,
+  INITIAL_DRAWINGS,
+  INITIAL_SPECIFICATIONS,
+  INITIAL_TOOLING_ITEMS,
+  INITIAL_WORK_INSTRUCTIONS,
+  INITIAL_QC_PLANS,
+  INITIAL_MATERIAL_REQUESTS,
+  INITIAL_PRODUCTION_READINESS,
+  INITIAL_NPI_PROJECTS,
+  INITIAL_RELEASE_PACKAGES,
+  INITIAL_ENGINEERING_CHANGES,
+  INITIAL_MACHINES,
+  INITIAL_MANPOWER,
+  INITIAL_SHIFTS,
+  INITIAL_CALENDARS,
+  INITIAL_CHANGEOVER_RULES,
+  INITIAL_PRODUCTION_PLANS,
+  INITIAL_FINITE_SCHEDULES,
+  INITIAL_WHAT_IF_SCENARIOS,
 } from '../mockData';
 import { runMRPCalculation } from '../calculations/mrpCalculator';
+import {
+  calculateOutputRate,
+  calculateMachineCapacity,
+  calculateRequiredMachineHours,
+  calculateManpowerRequirement,
+  explodeMultiLevelBom,
+  calculateChangeoverTime,
+  analyzeBottlenecks,
+  evaluateProductionFeasibility,
+  generateFiniteScheduleSlots,
+  runWhatIfSimulation,
+} from './ppicService';
 
 const STORAGE_KEY = 'kranex_mfg_erp_platform_v4';
 
@@ -91,6 +148,26 @@ export interface ErpState {
   workflows: WorkflowDefinition[];
   businessRules: BusinessRule[];
   subcontractOrders: SubcontractOrder[];
+  // Phase 8: NPI & Engineering Change Collections
+  drawings: EngineeringDrawing[];
+  specifications: EngineeringSpecification[];
+  toolingItems: ToolingItem[];
+  workInstructions: WorkInstruction[];
+  qcPlans: QcPlan[];
+  materialRequests: MaterialRequest[];
+  readinessReports: Record<string, ProductionReadinessReport>;
+  npiProjects: NpiProject[];
+  productReleases: ProductReleasePackage[];
+  engineeringChanges: EngineeringChangeRequest[];
+  // Phase 9: PPIC Planning, Finite Capacity & Scheduling
+  machines: MachineMaster[];
+  manpower: EmployeeManpower[];
+  productionCalendars: ProductionCalendar[];
+  productionShifts: ProductionShift[];
+  changeoverMatrix: ChangeoverRule[];
+  productionPlans: ProductionPlanItem[];
+  finiteSchedules: FiniteScheduledSlot[];
+  whatIfScenarios: WhatIfScenario[];
   customValues: Record<string, Record<string, any>>;
   selectedPlant: string;
   activeOrderFilter: string;
@@ -105,6 +182,7 @@ const getInitialState = (): ErpState => {
       const parsed = JSON.parse(saved);
       return {
         ...parsed,
+        products: parsed.products?.length ? parsed.products : INITIAL_PRODUCTS,
         suppliers: parsed.suppliers?.length ? parsed.suppliers : INITIAL_SUPPLIERS,
         purchaseRequisitions: parsed.purchaseRequisitions?.length ? parsed.purchaseRequisitions : INITIAL_PURCHASE_REQUISITIONS,
         purchaseOrders: parsed.purchaseOrders?.length ? parsed.purchaseOrders : INITIAL_PURCHASE_ORDERS,
@@ -114,6 +192,27 @@ const getInitialState = (): ErpState => {
         workflows: parsed.workflows?.length ? parsed.workflows : INITIAL_WORKFLOWS,
         businessRules: parsed.businessRules?.length ? parsed.businessRules : INITIAL_BUSINESS_RULES,
         subcontractOrders: parsed.subcontractOrders?.length ? parsed.subcontractOrders : INITIAL_SUBCONTRACT_ORDERS,
+        // Phase 8 additions
+        drawings: parsed.drawings?.length ? parsed.drawings : INITIAL_DRAWINGS,
+        specifications: parsed.specifications?.length ? parsed.specifications : INITIAL_SPECIFICATIONS,
+        toolingItems: parsed.toolingItems?.length ? parsed.toolingItems : INITIAL_TOOLING_ITEMS,
+        workInstructions: parsed.workInstructions?.length ? parsed.workInstructions : INITIAL_WORK_INSTRUCTIONS,
+        qcPlans: parsed.qcPlans?.length ? parsed.qcPlans : INITIAL_QC_PLANS,
+        materialRequests: parsed.materialRequests?.length ? parsed.materialRequests : INITIAL_MATERIAL_REQUESTS,
+        readinessReports: parsed.readinessReports || INITIAL_PRODUCTION_READINESS,
+        npiProjects: parsed.npiProjects?.length ? parsed.npiProjects : INITIAL_NPI_PROJECTS,
+        productReleases: parsed.productReleases?.length ? parsed.productReleases : INITIAL_RELEASE_PACKAGES,
+        engineeringChanges: parsed.engineeringChanges?.length ? parsed.engineeringChanges : INITIAL_ENGINEERING_CHANGES,
+        // Phase 9 additions
+        machines: parsed.machines?.length ? parsed.machines : INITIAL_MACHINES,
+        manpower: parsed.manpower?.length ? parsed.manpower : INITIAL_MANPOWER,
+        productionCalendars: parsed.productionCalendars?.length ? parsed.productionCalendars : INITIAL_CALENDARS,
+        productionShifts: parsed.productionShifts?.length ? parsed.productionShifts : INITIAL_SHIFTS,
+        changeoverMatrix: parsed.changeoverMatrix?.length ? parsed.changeoverMatrix : INITIAL_CHANGEOVER_RULES,
+        productionPlans: parsed.productionPlans?.length ? parsed.productionPlans : INITIAL_PRODUCTION_PLANS,
+        finiteSchedules: parsed.finiteSchedules?.length ? parsed.finiteSchedules : INITIAL_FINITE_SCHEDULES,
+        whatIfScenarios: parsed.whatIfScenarios?.length ? parsed.whatIfScenarios : INITIAL_WHAT_IF_SCENARIOS,
+        testingScenarios: INITIAL_TESTING_SCENARIOS, // Always keep up-to-date scenarios
         customValues: parsed.customValues || {
           'prd-001': { materialGrade: 'AISI 304 / AL 6061', thicknessMm: 2.5, rohsCompliant: true, drawingNumber: 'DWG-KRX-2026-08' },
           'mo-124': { customerProject: 'PRJ-AEROSPACE-90', priorityReason: 'Standard Schedule', targetProductionLine: 'Cell A - High Precision' },
@@ -152,6 +251,26 @@ const getInitialState = (): ErpState => {
     workflows: INITIAL_WORKFLOWS,
     businessRules: INITIAL_BUSINESS_RULES,
     subcontractOrders: INITIAL_SUBCONTRACT_ORDERS,
+    // Phase 8 additions
+    drawings: INITIAL_DRAWINGS,
+    specifications: INITIAL_SPECIFICATIONS,
+    toolingItems: INITIAL_TOOLING_ITEMS,
+    workInstructions: INITIAL_WORK_INSTRUCTIONS,
+    qcPlans: INITIAL_QC_PLANS,
+    materialRequests: INITIAL_MATERIAL_REQUESTS,
+    readinessReports: INITIAL_PRODUCTION_READINESS,
+    npiProjects: INITIAL_NPI_PROJECTS,
+    productReleases: INITIAL_RELEASE_PACKAGES,
+    engineeringChanges: INITIAL_ENGINEERING_CHANGES,
+    // Phase 9 additions
+    machines: INITIAL_MACHINES,
+    manpower: INITIAL_MANPOWER,
+    productionCalendars: INITIAL_CALENDARS,
+    productionShifts: INITIAL_SHIFTS,
+    changeoverMatrix: INITIAL_CHANGEOVER_RULES,
+    productionPlans: INITIAL_PRODUCTION_PLANS,
+    finiteSchedules: INITIAL_FINITE_SCHEDULES,
+    whatIfScenarios: INITIAL_WHAT_IF_SCENARIOS,
     customValues: {
       'prd-001': { materialGrade: 'AISI 304 / AL 6061', thicknessMm: 2.5, rohsCompliant: true, drawingNumber: 'DWG-KRX-2026-08' },
       'mo-124': { customerProject: 'PRJ-AEROSPACE-90', priorityReason: 'Standard Schedule', targetProductionLine: 'Cell A - High Precision' },
@@ -634,17 +753,29 @@ export function useErpStore() {
     addNotification('success', `Production order ${orderId} CLOSED and costs settled.`);
   }, [addNotification]);
 
-  // 7. createProductionOrder (Page 40-43 & 93)
+  // 7. createProductionOrder (Page 40-43, 93 & NPI Release Gate BR-NPI-001)
   const createProductionOrder = useCallback((data: {
     productId: string;
     quantity: number;
     dueDate: string;
   }) => {
     const product = state.products.find((p) => p.id === data.productId);
-    if (!product) return;
+    if (!product) return null;
+
+    // Strict Gate BR-NPI-001: Unreleased products under NPI cannot be released for normal production
+    if (product.lifecycleStatus && product.lifecycleStatus !== 'RELEASED') {
+      const errorMsg = `Action Blocked (BR-NPI-001): Product ${product.sku} is in '${product.lifecycleStatus}' stage. Normal commercial production orders can only be dispatched for products in 'RELEASED' status. To produce pre-production units, initiate an NPI Trial Run under NPI Management or approve the Product Release Package.`;
+      addNotification('error', errorMsg);
+      return null;
+    }
 
     const bom = state.boms.find((b) => b.productId === data.productId && b.status === 'ACTIVE') || state.boms[0];
     const routing = state.routings.find((r) => r.productId === data.productId && r.status === 'ACTIVE') || state.routings[0];
+
+    // Snapshot official approved baseline release package if available
+    const activeRelease = state.productReleases?.find(
+      (r) => r.productId === product.id && r.status === 'ACTIVE'
+    );
 
     const orderNum = `MO-2026-00${126 + state.productionOrders.length}`;
     const today = new Date().toISOString().split('T')[0];
@@ -704,10 +835,14 @@ export function useErpStore() {
       status: 'PLANNED',
       bomId: bom?.id || 'bom-001',
       bomCode: bom?.code || 'BOM-A',
-      bomRevision: bom?.revision || 'Rev.03',
+      bomRevision: activeRelease?.bomRevision || bom?.revision || 'Rev.03',
       routingId: routing?.id || 'rt-001',
       routingCode: routing?.code || 'ROUTE-A',
-      routingRevision: routing?.revision || 'Rev.02',
+      routingRevision: activeRelease?.routingRevision || routing?.revision || 'Rev.02',
+      productRevision: activeRelease?.releasedRevision || product.currentRevision || 'Rev A',
+      releasePackageId: activeRelease?.id,
+      wiRevision: activeRelease?.wiRevision || 'Rev A',
+      toolingRevision: activeRelease?.toolingRevision || 'Rev 01',
       plantId: 'PLANT-01',
       plantName: 'Cikarang Main Plant #1',
       dueDate: data.dueDate,
@@ -729,9 +864,9 @@ export function useErpStore() {
       productionOrders: [newOrder, ...prev.productionOrders],
     }));
 
-    addNotification('success', `Created Planned Order ${orderNum} for ${data.quantity} units of ${product.sku}.`);
+    addNotification('success', `Created Planned Order ${orderNum} for ${data.quantity} units of ${product.sku} (Snapshot: ${newOrder.productRevision}, BOM: ${newOrder.bomRevision}).`);
     return newOrder;
-  }, [state.products, state.boms, state.routings, state.productionOrders.length, addNotification]);
+  }, [state.products, state.boms, state.routings, state.productReleases, state.productionOrders.length, addNotification]);
 
   // 8. reportMachineBreakdown (Page 101)
   const reportMachineBreakdown = useCallback((
@@ -1583,7 +1718,1206 @@ export function useErpStore() {
           return o;
         }),
       }));
-      addNotification('success', `Received ${receivedQty} units from subcontract supplier.`);
+      addNotification('info', `Recorded receipt of ${receivedQty} units for subcontract order.`);
+    },
+    [addNotification]
+  );
+
+  // ============================================================================
+  // 25. PHASE 8: NPI & PRODUCT LIFECYCLE MANAGEMENT
+  // ============================================================================
+  const createNpiProject = useCallback(
+    (projectData: Partial<NpiProject>) => {
+      const pNum = `NPI-2026-00${state.npiProjects.length + 1}`;
+      const newProject: NpiProject = {
+        id: `npi-${Date.now()}`,
+        projectNumber: pNum,
+        productId: projectData.productId || 'prd-abc-100',
+        productSku: projectData.productSku || 'ABC-100',
+        productName: projectData.productName || 'Smart Industrial Gateway Controller ABC-100',
+        productRevision: projectData.productRevision || 'Rev A',
+        customer: projectData.customer || 'Target Enterprise Customer',
+        projectOwner: projectData.projectOwner || state.currentUser.name,
+        engineeringOwner: projectData.engineeringOwner || 'Hendra Gunawan',
+        ppicRepresentative: projectData.ppicRepresentative || 'Dewi Lestari',
+        productionRepresentative: projectData.productionRepresentative || 'Agus Pratama',
+        qualityRepresentative: projectData.qualityRepresentative || 'Siti Nurhaliza',
+        toolingRepresentative: projectData.toolingRepresentative || 'Budi Santoso',
+        targetReleaseDate: projectData.targetReleaseDate || '2026-11-30',
+        status: (projectData.status as NpiStatus) || 'DEVELOPMENT',
+        priority: projectData.priority || 'HIGH',
+        notes: projectData.notes || 'New Product Introduction lifecycle project.',
+        blockingIssues: projectData.blockingIssues || [],
+        milestones: projectData.milestones || [
+          { id: 'ms-new-1', title: 'Conceptual Design & BOM Draft', targetDate: '2026-10-30', status: 'IN_PROGRESS', responsibleRole: 'Engineering' },
+          { id: 'ms-new-2', title: 'Tooling Qualification & First Article', targetDate: '2026-11-10', status: 'PENDING', responsibleRole: 'Tooling' },
+          { id: 'ms-new-3', title: 'Material Kitting & Trial Run', targetDate: '2026-11-18', status: 'PENDING', responsibleRole: 'PPIC' },
+          { id: 'ms-new-4', title: 'Pilot Run & Commercial Release Gate', targetDate: '2026-11-30', status: 'PENDING', responsibleRole: 'Quality & Operations' },
+        ],
+        trialRuns: [],
+        pilotRuns: [],
+      };
+
+      setState((prev) => ({
+        ...prev,
+        npiProjects: [newProject, ...prev.npiProjects],
+      }));
+      addNotification('success', `Created NPI Project: ${newProject.projectNumber} (${newProject.productSku})`);
+      return newProject;
+    },
+    [state.npiProjects.length, state.currentUser.name, addNotification]
+  );
+
+  const updateNpiProject = useCallback(
+    (id: string, updates: Partial<NpiProject>) => {
+      setState((prev) => ({
+        ...prev,
+        npiProjects: prev.npiProjects.map((p) => (p.id === id ? { ...p, ...updates } : p)),
+      }));
+      addNotification('info', `Updated NPI Project.`);
+    },
+    [addNotification]
+  );
+
+  const updateNpiMilestone = useCallback(
+    (projectId: string, milestoneId: string, status: 'COMPLETED' | 'IN_PROGRESS' | 'PENDING') => {
+      setState((prev) => ({
+        ...prev,
+        npiProjects: prev.npiProjects.map((p) => {
+          if (p.id === projectId) {
+            return {
+              ...p,
+              milestones: p.milestones.map((m) =>
+                m.id === milestoneId
+                  ? {
+                      ...m,
+                      status,
+                      completedDate: status === 'COMPLETED' ? new Date().toISOString().split('T')[0] : m.completedDate,
+                    }
+                  : m
+              ),
+            };
+          }
+          return p;
+        }),
+      }));
+      addNotification('info', `Milestone status updated to ${status}.`);
+    },
+    [addNotification]
+  );
+
+  // 26. 6-PILLAR DETERMINISTIC PRODUCTION READINESS CHECK
+  const runProductionReadinessCheck = useCallback(
+    (npiProjectId: string) => {
+      const project = state.npiProjects.find((p) => p.id === npiProjectId);
+      if (!project) return;
+
+      const dwgApproved = state.drawings.some(
+        (d) => d.productId === project.productId && (d.status === 'APPROVED' || d.status === 'RELEASED')
+      );
+      const specApproved = state.specifications.some(
+        (s) => s.productId === project.productId && (s.status === 'APPROVED' || s.status === 'RELEASED')
+      );
+      const bomApproved = state.boms.some((b) => b.productId === project.productId && b.status === 'ACTIVE');
+      const routingApproved = state.routings.some((r) => r.productId === project.productId && r.status === 'ACTIVE');
+      const toolingQualified = state.toolingItems.some(
+        (t) => t.productId === project.productId && (t.status === 'READY' || t.status === 'IN_USE')
+      );
+      const wiReleased = state.workInstructions.some(
+        (w) => w.productId === project.productId && (w.status === 'APPROVED' || w.status === 'RELEASED')
+      );
+      const qcPlanReleased = state.qcPlans.some(
+        (q) => q.productId === project.productId && (q.status === 'APPROVED' || q.status === 'RELEASED')
+      );
+      const materialReady = state.materialRequests.some(
+        (m) => (m.sourceReferenceId === project.projectNumber || m.sourceReferenceId === project.id) && m.status === 'DELIVERED'
+      );
+
+      const items = [
+        {
+          id: 'p-eng-1',
+          pillar: 'ENGINEERING' as const,
+          checkItem: `CAD Drawing Approved & Released (${project.productSku})`,
+          status: dwgApproved ? ('READY' as const) : ('BLOCKED' as const),
+          blockingReason: dwgApproved ? undefined : 'No approved CAD drawing found for this product revision.',
+          responsibleRole: 'Lead Mechanical Eng',
+          verifiedBy: dwgApproved ? 'Bambang Sutrisno' : undefined,
+          verifiedAt: dwgApproved ? new Date().toISOString().split('T')[0] : undefined,
+        },
+        {
+          id: 'p-eng-2',
+          pillar: 'ENGINEERING' as const,
+          checkItem: `Engineering Specification Released`,
+          status: specApproved ? ('READY' as const) : ('BLOCKED' as const),
+          blockingReason: specApproved ? undefined : 'Specification document has not been formally approved.',
+          responsibleRole: 'Systems Architect',
+          verifiedBy: specApproved ? 'Hendra Gunawan' : undefined,
+          verifiedAt: specApproved ? new Date().toISOString().split('T')[0] : undefined,
+        },
+        {
+          id: 'p-eng-3',
+          pillar: 'ENGINEERING' as const,
+          checkItem: `BOM Hierarchy Validated & Released`,
+          status: bomApproved ? ('READY' as const) : ('BLOCKED' as const),
+          blockingReason: bomApproved ? undefined : 'Active BOM is missing or not submitted.',
+          responsibleRole: 'BOM Engineer',
+          verifiedBy: bomApproved ? 'Dewi Lestari' : undefined,
+          verifiedAt: bomApproved ? new Date().toISOString().split('T')[0] : undefined,
+        },
+        {
+          id: 'p-tool-1',
+          pillar: 'TOOLING' as const,
+          checkItem: `Production Tooling Qualified (Molds, Jigs, Dies)`,
+          status: toolingQualified ? ('READY' as const) : ('BLOCKED' as const),
+          blockingReason: toolingQualified ? undefined : 'Required tooling is still in DESIGN or FABRICATION.',
+          responsibleRole: 'Tooling Specialist',
+          verifiedBy: toolingQualified ? 'Hendra Gunawan' : undefined,
+          verifiedAt: toolingQualified ? new Date().toISOString().split('T')[0] : undefined,
+        },
+        {
+          id: 'p-proc-1',
+          pillar: 'PROCESS' as const,
+          checkItem: `Manufacturing Routing & Work Instructions Released`,
+          status: routingApproved && wiReleased ? ('READY' as const) : ('BLOCKED' as const),
+          blockingReason: !routingApproved ? 'Routing is not active.' : !wiReleased ? 'Work Instructions not approved.' : undefined,
+          responsibleRole: 'Methods Engineer',
+          verifiedBy: routingApproved && wiReleased ? 'Dewi Lestari' : undefined,
+          verifiedAt: routingApproved && wiReleased ? new Date().toISOString().split('T')[0] : undefined,
+        },
+        {
+          id: 'p-mat-1',
+          pillar: 'MATERIAL' as const,
+          checkItem: `Trial Raw Materials Staged at Production Line (MR)`,
+          status: materialReady ? ('READY' as const) : ('NOT_READY' as const),
+          blockingReason: materialReady ? undefined : 'Material Request pending warehouse delivery to line staging.',
+          responsibleRole: 'Warehouse Manager',
+          verifiedBy: materialReady ? 'Joko Susilo' : undefined,
+          verifiedAt: materialReady ? new Date().toISOString().split('T')[0] : undefined,
+        },
+        {
+          id: 'p-qc-1',
+          pillar: 'QUALITY' as const,
+          checkItem: `Quality Control Plan & Inspection Characteristics Released`,
+          status: qcPlanReleased ? ('READY' as const) : ('BLOCKED' as const),
+          blockingReason: qcPlanReleased ? undefined : 'QC Plan (QCP) not yet released.',
+          responsibleRole: 'Quality Director',
+          verifiedBy: qcPlanReleased ? 'Siti Nurhaliza' : undefined,
+          verifiedAt: qcPlanReleased ? new Date().toISOString().split('T')[0] : undefined,
+        },
+        {
+          id: 'p-ppl-1',
+          pillar: 'PEOPLE_PRODUCTION' as const,
+          checkItem: `Shop Floor Operators Certified & Shift Scheduled`,
+          status: 'READY' as const,
+          responsibleRole: 'Production Supervisor',
+          verifiedBy: 'Agus Pratama',
+          verifiedAt: new Date().toISOString().split('T')[0],
+        },
+      ];
+
+      const blockingIssues = items.filter((i) => i.status === 'BLOCKED').map((i) => `${i.checkItem}: ${i.blockingReason}`);
+      const overallStatus = blockingIssues.length > 0 ? ('BLOCKED' as const) : items.some((i) => i.status === 'NOT_READY') ? ('NOT_READY' as const) : ('READY' as const);
+
+      const report: ProductionReadinessReport = {
+        id: `read-${Date.now()}`,
+        npiProjectId,
+        productSku: project.productSku,
+        productRevision: project.productRevision,
+        targetRunType: project.status === 'TRIAL' ? 'TRIAL' : 'PILOT',
+        overallStatus,
+        items,
+        blockingIssues,
+        evaluatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+        evaluator: state.currentUser.name,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        readinessReports: {
+          ...prev.readinessReports,
+          [npiProjectId]: report,
+        },
+        npiProjects: prev.npiProjects.map((p) =>
+          p.id === npiProjectId ? { ...p, blockingIssues } : p
+        ),
+      }));
+
+      addNotification(
+        overallStatus === 'READY' ? 'success' : 'warning',
+        `Production Readiness Evaluated: Overall status is ${overallStatus}. ${blockingIssues.length} blockers detected.`
+      );
+    },
+    [state.npiProjects, state.drawings, state.specifications, state.boms, state.routings, state.toolingItems, state.workInstructions, state.qcPlans, state.materialRequests, state.currentUser.name, addNotification]
+  );
+
+  // 27. RECORD TRIAL & PILOT RUNS
+  const recordNpiTrialRun = useCallback(
+    (trialData: NpiTrialRun) => {
+      setState((prev) => ({
+        ...prev,
+        npiProjects: prev.npiProjects.map((p) => {
+          if (p.id === trialData.npiProjectId) {
+            return {
+              ...p,
+              status: trialData.trialResult === 'PASS' || trialData.trialResult === 'PASS_WITH_ACTION' ? 'PILOT' : 'TRIAL',
+              trialRuns: [trialData, ...p.trialRuns],
+            };
+          }
+          return p;
+        }),
+      }));
+      addNotification('success', `Recorded Trial Run ${trialData.trialNumber}: Result ${trialData.trialResult}.`);
+    },
+    [addNotification]
+  );
+
+  const recordNpiPilotRun = useCallback(
+    (pilotData: NpiPilotRun) => {
+      setState((prev) => ({
+        ...prev,
+        npiProjects: prev.npiProjects.map((p) => {
+          if (p.id === pilotData.npiProjectId) {
+            return {
+              ...p,
+              status: pilotData.pilotResult === 'PASS' ? 'READY_FOR_RELEASE' : p.status,
+              pilotRuns: [pilotData, ...p.pilotRuns],
+            };
+          }
+          return p;
+        }),
+      }));
+      addNotification('success', `Recorded Pilot Run ${pilotData.pilotNumber}: Result ${pilotData.pilotResult}. Project marked as READY FOR RELEASE.`);
+    },
+    [addNotification]
+  );
+
+  // 28. PRODUCT RELEASE PACKAGE & OFFICIAL RELEASE GATE
+  const createProductRelease = useCallback(
+    (releaseData: Partial<ProductReleasePackage>) => {
+      const pkgNum = `REL-PKG-2026-${(state.productReleases.length + 1).toString().padStart(3, '0')}`;
+      const newPackage: ProductReleasePackage = {
+        id: `rel-${Date.now()}`,
+        packageNumber: pkgNum,
+        productId: releaseData.productId || 'prd-abc-100',
+        productSku: releaseData.productSku || 'ABC-100',
+        productName: releaseData.productName || 'Smart Industrial Gateway Controller ABC-100',
+        releasedRevision: releaseData.releasedRevision || 'Rev A',
+        drawingRevision: releaseData.drawingRevision || 'DWG-ABC-100-A Rev A',
+        specificationRevision: releaseData.specificationRevision || 'SPEC-ABC-100-A Rev A',
+        bomRevision: releaseData.bomRevision || 'BOM-001 Rev.01',
+        routingRevision: releaseData.routingRevision || 'RT-001 Rev.01',
+        toolingRevision: releaseData.toolingRevision || 'TOOL-MOLD-GW01 Rev 01',
+        wiRevision: releaseData.wiRevision || 'WI-ABC-100-OP10 Rev A',
+        qcPlanRevision: releaseData.qcPlanRevision || 'QCP-ABC-100-A Rev A',
+        effectiveDate: releaseData.effectiveDate || new Date().toISOString().split('T')[0],
+        releasedBy: state.currentUser.name,
+        status: 'ACTIVE',
+        notes: releaseData.notes || 'Formal manufacturing baseline package release.',
+        approvals: [
+          { role: 'VP Engineering', approver: 'Ir. Agus Wijaya', approvedAt: new Date().toISOString().replace('T', ' ').slice(0, 16), status: 'APPROVED' },
+          { role: 'Quality Assurance Director', approver: 'Siti Nurhaliza', approvedAt: new Date().toISOString().replace('T', ' ').slice(0, 16), status: 'APPROVED' },
+          { role: 'Production GM', approver: state.currentUser.name, approvedAt: new Date().toISOString().replace('T', ' ').slice(0, 16), status: 'APPROVED' },
+          { role: 'PPIC Operations Lead', approver: 'Dewi Lestari', approvedAt: new Date().toISOString().replace('T', ' ').slice(0, 16), status: 'APPROVED' },
+        ],
+      };
+
+      // Set product lifecycle to RELEASED
+      setState((prev) => {
+        const updatedProducts = prev.products.map((prod) => {
+          if (prod.id === newPackage.productId || prod.sku === newPackage.productSku) {
+            return {
+              ...prod,
+              lifecycleStatus: 'RELEASED' as const,
+              currentRevision: newPackage.releasedRevision,
+              effectiveDate: newPackage.effectiveDate,
+            };
+          }
+          return prod;
+        });
+
+        const audit: AuditLogEntry = {
+          id: `aud-${Date.now()}`,
+          documentId: newPackage.packageNumber,
+          documentType: 'PRODUCT_RELEASE',
+          action: 'RELEASE_PRODUCT',
+          actor: state.currentUser.name,
+          role: state.currentUser.role,
+          timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
+          oldStatus: 'PILOT',
+          newStatus: 'RELEASED',
+          decision: 'APPROVED',
+          reason: `Approved official manufacturing baseline release package ${newPackage.packageNumber} for ${newPackage.productSku} ${newPackage.releasedRevision}. Product is now authorized for commercial volume production.`,
+        };
+
+        return {
+          ...prev,
+          productReleases: [newPackage, ...prev.productReleases],
+          products: updatedProducts,
+          auditLogs: [audit, ...prev.auditLogs],
+        };
+      });
+
+      addNotification('success', `Product ${newPackage.productSku} is officially RELEASED for commercial manufacturing (Package: ${newPackage.packageNumber}).`);
+      return newPackage;
+    },
+    [state.productReleases.length, state.currentUser, addNotification]
+  );
+
+  // 29. MATERIAL REQUEST & PHYSICAL LINE DELIVERY LEDGER
+  const createMaterialRequest = useCallback(
+    (mrData: Partial<MaterialRequest>) => {
+      const mrNum = `MR-2026-${(state.materialRequests.length + 1).toString().padStart(6, '0')}`;
+      const newMR: MaterialRequest = {
+        id: `mr-${Date.now()}`,
+        requestNumber: mrNum,
+        sourceType: mrData.sourceType || 'PRODUCTION_ORDER',
+        sourceReferenceId: mrData.sourceReferenceId || 'MO-2026-00124',
+        productId: mrData.productId,
+        productSku: mrData.productSku,
+        requester: mrData.requester || state.currentUser.name,
+        department: mrData.department || 'Manufacturing Shop Floor',
+        requiredDate: mrData.requiredDate || new Date().toISOString().split('T')[0],
+        destinationLine: mrData.destinationLine || 'Line 1 - Staging Bay',
+        priority: mrData.priority || 'HIGH',
+        status: 'SUBMITTED',
+        items: mrData.items || [],
+        notes: mrData.notes,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        materialRequests: [newMR, ...prev.materialRequests],
+      }));
+      addNotification('success', `Created Material Request: ${newMR.requestNumber}`);
+      return newMR;
+    },
+    [state.materialRequests.length, state.currentUser.name, addNotification]
+  );
+
+  const pickMaterialRequest = useCallback(
+    (id: string, pickedBy: string) => {
+      setState((prev) => ({
+        ...prev,
+        materialRequests: prev.materialRequests.map((mr) => {
+          if (mr.id === id) {
+            return {
+              ...mr,
+              status: 'READY' as const,
+              pickedBy,
+              pickedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+              items: mr.items.map((it) => ({
+                ...it,
+                pickedQuantity: it.requestedQuantity,
+                status: 'PICKED' as const,
+              })),
+            };
+          }
+          return mr;
+        }),
+      }));
+      addNotification('info', `Material Request picked from warehouse bins and staged for line dispatch.`);
+    },
+    [addNotification]
+  );
+
+  const deliverMaterialRequestToLine = useCallback(
+    (id: string, deliveredBy: string, lineLocation: string) => {
+      const mr = state.materialRequests.find((m) => m.id === id);
+      if (!mr) return;
+
+      const timeStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+
+      // Post physical StockMovement into WIP / Line Staging
+      const movements: StockMovement[] = mr.items.map((item, idx) => ({
+        id: `mov-${Date.now()}-${idx}-line`,
+        movementNo: `MATDOC-LINE-${Date.now().toString().slice(-5)}-${idx}`,
+        timestamp: timeStr,
+        productId: item.productId,
+        sku: item.sku,
+        quantity: item.requestedQuantity,
+        uom: item.uom,
+        fromLocation: item.fromWarehouse || 'MAIN-WH-STAGING',
+        toLocation: lineLocation || mr.destinationLine,
+        lotNumber: `LOT-LINE-${Date.now().toString().slice(-4)}`,
+        sourceDocument: mr.requestNumber,
+        movementType: 'GI_PRODUCTION',
+        stockBucket: 'WIP',
+      }));
+
+      const audit: AuditLogEntry = {
+        id: `aud-${Date.now()}`,
+        documentId: mr.requestNumber,
+        documentType: 'MATERIAL_REQUEST',
+        action: 'LINE_DELIVERY',
+        actor: deliveredBy,
+        role: 'Material Logistics Handler',
+        timestamp: timeStr,
+        oldStatus: mr.status,
+        newStatus: 'DELIVERED',
+        decision: 'EXECUTED',
+        reason: `Delivered ${mr.items.length} line items to ${lineLocation || mr.destinationLine}. Inventory posted to WIP ledger.`,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        stockMovements: [...movements, ...prev.stockMovements],
+        materialRequests: prev.materialRequests.map((m) => {
+          if (m.id === id) {
+            return {
+              ...m,
+              status: 'DELIVERED' as const,
+              deliveredBy,
+              deliveredAt: timeStr,
+              receivedBy: state.currentUser.name,
+              receivedAt: timeStr,
+              items: m.items.map((it) => ({
+                ...it,
+                deliveredQuantity: it.requestedQuantity,
+                status: 'DELIVERED' as const,
+              })),
+            };
+          }
+          return m;
+        }),
+        auditLogs: [audit, ...prev.auditLogs],
+      }));
+
+      addNotification('success', `Material Request ${mr.requestNumber} delivered to line. Ledger updated.`);
+    },
+    [state.materialRequests, state.currentUser.name, addNotification]
+  );
+
+  // 30. ENGINEERING CHANGE MANAGEMENT (ECR / ECO)
+  const createEngineeringChangeRequest = useCallback(
+    (ecrData: Partial<EngineeringChangeRequest>) => {
+      const ecrNum = `ECR-2026-${(state.engineeringChanges.length + 5).toString().padStart(6, '0')}`;
+      const newEcr: EngineeringChangeRequest = {
+        id: `ecr-${Date.now()}`,
+        ecrNumber: ecrNum,
+        productId: ecrData.productId || 'prd-001',
+        productSku: ecrData.productSku || 'Product A',
+        productName: ecrData.productName || 'Industrial Motor Controller (Product A)',
+        currentRevision: ecrData.currentRevision || 'Rev A',
+        proposedRevision: ecrData.proposedRevision || 'Rev B',
+        reason: ecrData.reason || 'Engineering specification update.',
+        requestedBy: ecrData.requestedBy || state.currentUser.name,
+        department: ecrData.department || 'Engineering',
+        priority: ecrData.priority || 'HIGH',
+        status: 'IMPACT_ANALYSIS',
+        targetEffectiveDate: ecrData.targetEffectiveDate || new Date().toISOString().split('T')[0],
+        createdAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+        impactAnalysis: ecrData.impactAnalysis || {
+          bomImpact: true,
+          routingImpact: true,
+          wiImpact: true,
+          qcImpact: true,
+          toolingImpact: false,
+          costImpact: true,
+          customerApprovalRequired: false,
+          estimatedCostDifference: 0,
+          affectedOpenWorkOrderIds: state.productionOrders.filter((o) => o.status === 'RELEASED' || o.status === 'PLANNED').map((o) => o.id),
+          inventoryOldMaterialRemaining: [],
+          inventoryNewMaterialRequired: [],
+          impactSummary: 'Analysis pending review.',
+        },
+        openWorkOrderDecisions: state.productionOrders.map((o) => ({
+          workOrderId: o.id,
+          orderNumber: o.orderNumber,
+          productSku: o.productSku,
+          currentRevision: o.bomRevision || 'Rev A',
+          progressPercentage: o.status === 'IN_PROGRESS' ? 50 : 0,
+          decision: o.status === 'IN_PROGRESS' ? 'CONTINUE_EXISTING_REV' : 'APPLY_NEW_REV',
+        })),
+        approvals: [
+          { role: 'Engineering Lead', approver: 'Hendra Gunawan', status: 'PENDING' },
+          { role: 'Quality Assurance', approver: 'Siti Nurhaliza', status: 'PENDING' },
+          { role: 'Operations Director', approver: 'Ir. Agus Wijaya', status: 'PENDING' },
+        ],
+      };
+
+      setState((prev) => ({
+        ...prev,
+        engineeringChanges: [newEcr, ...prev.engineeringChanges],
+      }));
+      addNotification('success', `Created Engineering Change Request: ${newEcr.ecrNumber}`);
+      return newEcr;
+    },
+    [state.engineeringChanges.length, state.productionOrders, state.currentUser.name, addNotification]
+  );
+
+  const decideOpenWorkOrderEcr = useCallback(
+    (ecrId: string, workOrderId: string, decision: OpenWorkOrderDecision['decision'], notes?: string) => {
+      setState((prev) => ({
+        ...prev,
+        engineeringChanges: prev.engineeringChanges.map((ecr) => {
+          if (ecr.id === ecrId) {
+            return {
+              ...ecr,
+              openWorkOrderDecisions: ecr.openWorkOrderDecisions.map((dec) =>
+                dec.workOrderId === workOrderId
+                  ? {
+                      ...dec,
+                      decision,
+                      notes: notes || dec.notes,
+                      authorizedBy: prev.currentUser.name,
+                    }
+                  : dec
+              ),
+            };
+          }
+          return ecr;
+        }),
+      }));
+      addNotification('info', `Updated Open Work Order decision: ${decision}`);
+    },
+    [addNotification]
+  );
+
+  const approveEngineeringChange = useCallback(
+    (ecrId: string, role: string, approver: string) => {
+      setState((prev) => ({
+        ...prev,
+        engineeringChanges: prev.engineeringChanges.map((ecr) => {
+          if (ecr.id === ecrId) {
+            const updatedApprovals = ecr.approvals.map((app) =>
+              app.role === role
+                ? { ...app, approver, status: 'APPROVED' as const, approvedAt: new Date().toISOString().replace('T', ' ').slice(0, 16) }
+                : app
+            );
+            const allApproved = updatedApprovals.every((a) => a.status === 'APPROVED');
+            return {
+              ...ecr,
+              approvals: updatedApprovals,
+              status: allApproved ? ('APPROVED' as const) : ecr.status,
+            };
+          }
+          return ecr;
+        }),
+      }));
+      addNotification('success', `Approved ECR sign-off for ${role}.`);
+    },
+    [addNotification]
+  );
+
+  const releaseEngineeringChange = useCallback(
+    (ecrId: string, effectiveDate: string) => {
+      const ecr = state.engineeringChanges.find((e) => e.id === ecrId);
+      if (!ecr) return;
+
+      const timeStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+
+      // Create new Release Package for the proposed revision
+      const newReleasePkg: ProductReleasePackage = {
+        id: `rel-${Date.now()}-ecr`,
+        packageNumber: `REL-PKG-2026-${(state.productReleases.length + 1).toString().padStart(3, '0')}`,
+        productId: ecr.productId,
+        productSku: ecr.productSku,
+        productName: ecr.productName,
+        releasedRevision: ecr.proposedRevision,
+        drawingRevision: `${ecr.productSku} Drawing ${ecr.proposedRevision}`,
+        specificationRevision: `${ecr.productSku} Spec ${ecr.proposedRevision}`,
+        bomRevision: `${ecr.productSku} BOM ${ecr.proposedRevision}`,
+        routingRevision: `${ecr.productSku} Routing ${ecr.proposedRevision}`,
+        toolingRevision: 'Standard Tooling Rev',
+        wiRevision: `${ecr.productSku} WI ${ecr.proposedRevision}`,
+        qcPlanRevision: `${ecr.productSku} QCP ${ecr.proposedRevision}`,
+        effectiveDate,
+        releasedBy: state.currentUser.name,
+        status: 'ACTIVE',
+        notes: `Released via ${ecr.ecrNumber}: ${ecr.reason}`,
+        approvals: [
+          { role: 'Engineering Lead', approver: state.currentUser.name, approvedAt: timeStr, status: 'APPROVED' },
+          { role: 'Operations Director', approver: 'Ir. Agus Wijaya', approvedAt: timeStr, status: 'APPROVED' },
+        ],
+      };
+
+      // Mark older release packages for this product as SUPERSEDED
+      const updatedReleases = state.productReleases.map((pkg) =>
+        pkg.productId === ecr.productId ? { ...pkg, status: 'SUPERSEDED' as const } : pkg
+      );
+
+      // Update product master current revision
+      const updatedProducts = state.products.map((p) =>
+        p.id === ecr.productId
+          ? {
+              ...p,
+              currentRevision: ecr.proposedRevision,
+              drawingRevision: ecr.proposedRevision,
+              specificationRevision: ecr.proposedRevision,
+              effectiveDate,
+            }
+          : p
+      );
+
+      // Apply decisions to open work orders deterministically
+      const updatedProductionOrders = state.productionOrders.map((order) => {
+        const decisionObj = ecr.openWorkOrderDecisions.find((d) => d.workOrderId === order.id);
+        if (!decisionObj) return order;
+
+        if (decisionObj.decision === 'APPLY_NEW_REV') {
+          return {
+            ...order,
+            productRevision: ecr.proposedRevision,
+            bomRevision: `${ecr.productSku} BOM ${ecr.proposedRevision}`,
+            routingRevision: `${ecr.productSku} Routing ${ecr.proposedRevision}`,
+          };
+        }
+        if (decisionObj.decision === 'HOLD_WORK_ORDER') {
+          return {
+            ...order,
+            status: 'PLANNED' as const, // Or held
+          };
+        }
+        // If CONTINUE_EXISTING_REV: remains untouched!
+        return order;
+      });
+
+      const audit: AuditLogEntry = {
+        id: `aud-${Date.now()}`,
+        documentId: ecr.ecrNumber,
+        documentType: 'ENGINEERING_CHANGE',
+        action: 'RELEASE_ECR_REVISION',
+        actor: state.currentUser.name,
+        role: state.currentUser.role,
+        timestamp: timeStr,
+        oldStatus: ecr.status,
+        newStatus: 'EFFECTIVE',
+        decision: 'EXECUTED',
+        reason: `Engineering Change ${ecr.ecrNumber} made EFFECTIVE. Created baseline ${newReleasePkg.packageNumber} (${ecr.proposedRevision}). Open orders updated per authorized decisions without retroactive data corruption.`,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        engineeringChanges: prev.engineeringChanges.map((e) =>
+          e.id === ecrId ? { ...e, status: 'EFFECTIVE' as const, effectiveAt: timeStr, releasedPackageId: newReleasePkg.id } : e
+        ),
+        productReleases: [newReleasePkg, ...updatedReleases],
+        products: updatedProducts,
+        productionOrders: updatedProductionOrders,
+        auditLogs: [audit, ...prev.auditLogs],
+      }));
+
+      addNotification('success', `ECR ${ecr.ecrNumber} released! New revision ${ecr.proposedRevision} is now EFFECTIVE as of ${effectiveDate}.`);
+    },
+    [state.engineeringChanges, state.productReleases, state.products, state.productionOrders, state.currentUser, addNotification]
+  );
+
+  // 31. TOOLING, WI, QC PLAN & DRAWING ACTIONS
+  const createToolingItem = useCallback(
+    (toolData: Partial<ToolingItem>) => {
+      const newTool: ToolingItem = {
+        id: `tool-${Date.now()}`,
+        toolId: toolData.toolId || `TOOL-${Date.now().toString().slice(-4)}`,
+        name: toolData.name || 'New Tooling Item',
+        type: toolData.type || 'MOLD',
+        productId: toolData.productId || 'prd-abc-100',
+        productSku: toolData.productSku || 'ABC-100',
+        revision: toolData.revision || 'Rev 01',
+        status: toolData.status || 'READY',
+        location: toolData.location || 'Tool Crib Bay 1',
+        owner: toolData.owner || 'Tooling Section',
+        capacityPerShift: toolData.capacityPerShift || 1000,
+        expectedLifeShots: toolData.expectedLifeShots || 100000,
+        currentShots: toolData.currentShots || 0,
+        maintenanceIntervalShots: toolData.maintenanceIntervalShots || 10000,
+        notes: toolData.notes,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        toolingItems: [newTool, ...prev.toolingItems],
+      }));
+      addNotification('success', `Created Tooling Master: ${newTool.toolId}`);
+      return newTool;
+    },
+    [addNotification]
+  );
+
+  const updateToolingStatus = useCallback(
+    (id: string, status: ToolStatus) => {
+      setState((prev) => ({
+        ...prev,
+        toolingItems: prev.toolingItems.map((t) => (t.id === id ? { ...t, status } : t)),
+      }));
+      addNotification('info', `Tooling status updated to ${status}.`);
+    },
+    [addNotification]
+  );
+
+  const createEngineeringDrawing = useCallback(
+    (drawing: Partial<EngineeringDrawing>) => {
+      const newDwg: EngineeringDrawing = {
+        id: `dwg-${Date.now()}`,
+        drawingNumber: drawing.drawingNumber || `DWG-${Date.now().toString().slice(-4)}`,
+        revision: drawing.revision || 'Rev A',
+        productId: drawing.productId || 'prd-abc-100',
+        productSku: drawing.productSku || 'ABC-100',
+        title: drawing.title || 'Technical CAD Blueprint',
+        fileReference: drawing.fileReference || 'model.step',
+        cadModelType: drawing.cadModelType || '3D_STEP',
+        description: drawing.description || 'Master blueprint reference.',
+        status: drawing.status || 'RELEASED',
+        createdBy: state.currentUser.name,
+        createdDate: new Date().toISOString().split('T')[0],
+        approvedBy: state.currentUser.name,
+        approvalDate: new Date().toISOString().split('T')[0],
+        effectiveDate: new Date().toISOString().split('T')[0],
+      };
+      setState((prev) => ({
+        ...prev,
+        drawings: [newDwg, ...prev.drawings],
+      }));
+      addNotification('success', `Registered Engineering Drawing: ${newDwg.drawingNumber}`);
+      return newDwg;
+    },
+    [state.currentUser.name, addNotification]
+  );
+
+  const approveEngineeringDrawing = useCallback(
+    (id: string) => {
+      setState((prev) => ({
+        ...prev,
+        drawings: prev.drawings.map((d) =>
+          d.id === id
+            ? {
+                ...d,
+                status: 'RELEASED' as const,
+                approvedBy: prev.currentUser.name,
+                approvalDate: new Date().toISOString().split('T')[0],
+              }
+            : d
+        ),
+      }));
+      addNotification('success', `Drawing approved and released.`);
+    },
+    [addNotification]
+  );
+
+  const createEngineeringSpecification = useCallback(
+    (spec: Partial<EngineeringSpecification>) => {
+      const newSpec: EngineeringSpecification = {
+        id: `spec-${Date.now()}`,
+        specNumber: spec.specNumber || `SPEC-${Date.now().toString().slice(-4)}`,
+        revision: spec.revision || 'Rev A',
+        productId: spec.productId || 'prd-abc-100',
+        productSku: spec.productSku || 'ABC-100',
+        title: spec.title || 'Engineering Specification',
+        content: spec.content || 'Technical performance criteria.',
+        criticalParameters: spec.criticalParameters || [],
+        status: spec.status || 'RELEASED',
+        approvedBy: state.currentUser.name,
+        effectiveDate: new Date().toISOString().split('T')[0],
+      };
+      setState((prev) => ({
+        ...prev,
+        specifications: [newSpec, ...prev.specifications],
+      }));
+      addNotification('success', `Created Specification: ${newSpec.specNumber}`);
+      return newSpec;
+    },
+    [state.currentUser.name, addNotification]
+  );
+
+  const approveEngineeringSpecification = useCallback(
+    (id: string) => {
+      setState((prev) => ({
+        ...prev,
+        specifications: prev.specifications.map((s) =>
+          s.id === id ? { ...s, status: 'RELEASED' as const, approvedBy: prev.currentUser.name } : s
+        ),
+      }));
+      addNotification('success', `Specification approved and released.`);
+    },
+    [addNotification]
+  );
+
+  const createWorkInstruction = useCallback(
+    (wi: Partial<WorkInstruction>) => {
+      const newWi: WorkInstruction = {
+        id: `wi-${Date.now()}`,
+        wiNumber: wi.wiNumber || `WI-${Date.now().toString().slice(-4)}`,
+        revision: wi.revision || 'Rev A',
+        productId: wi.productId || 'prd-abc-100',
+        productSku: wi.productSku || 'ABC-100',
+        productRevision: wi.productRevision || 'Rev A',
+        operationSeq: wi.operationSeq || 10,
+        operationName: wi.operationName || 'Assembly Operation',
+        workCenterId: wi.workCenterId || 'wc-01',
+        workCenterName: wi.workCenterName || 'High Precision Work Center',
+        title: wi.title || 'Standard Operating Procedure',
+        instructions: wi.instructions || ['Step 1: Check components', 'Step 2: Assemble'],
+        safetyNotes: wi.safetyNotes || ['Wear safety goggles'],
+        qualityCheckpoints: wi.qualityCheckpoints || ['Verify dimensions'],
+        requiredTools: wi.requiredTools || ['Torque Wrench'],
+        requiredMaterials: wi.requiredMaterials || ['Raw Materials'],
+        status: wi.status || 'RELEASED',
+        approvedBy: state.currentUser.name,
+        approvalDate: new Date().toISOString().split('T')[0],
+        effectiveDate: new Date().toISOString().split('T')[0],
+      };
+      setState((prev) => ({
+        ...prev,
+        workInstructions: [newWi, ...prev.workInstructions],
+      }));
+      addNotification('success', `Created Work Instruction: ${newWi.wiNumber}`);
+      return newWi;
+    },
+    [state.currentUser.name, addNotification]
+  );
+
+  const approveWorkInstruction = useCallback(
+    (id: string) => {
+      setState((prev) => ({
+        ...prev,
+        workInstructions: prev.workInstructions.map((w) =>
+          w.id === id ? { ...w, status: 'RELEASED' as const, approvedBy: prev.currentUser.name } : w
+        ),
+      }));
+      addNotification('success', `Work Instruction approved and released.`);
+    },
+    [addNotification]
+  );
+
+  const createQcPlan = useCallback(
+    (plan: Partial<QcPlan>) => {
+      const newPlan: QcPlan = {
+        id: `qcp-${Date.now()}`,
+        planNumber: plan.planNumber || `QCP-${Date.now().toString().slice(-4)}`,
+        revision: plan.revision || 'Rev A',
+        productId: plan.productId || 'prd-abc-100',
+        productSku: plan.productSku || 'ABC-100',
+        productRevision: plan.productRevision || 'Rev A',
+        operationSeq: plan.operationSeq || 10,
+        operationName: plan.operationName || 'Final Inspection',
+        status: plan.status || 'RELEASED',
+        characteristics: plan.characteristics || [],
+        approvedBy: state.currentUser.name,
+        effectiveDate: new Date().toISOString().split('T')[0],
+      };
+      setState((prev) => ({
+        ...prev,
+        qcPlans: [newPlan, ...prev.qcPlans],
+      }));
+      addNotification('success', `Created QC Plan: ${newPlan.planNumber}`);
+      return newPlan;
+    },
+    [state.currentUser.name, addNotification]
+  );
+
+  const approveQcPlan = useCallback(
+    (id: string) => {
+      setState((prev) => ({
+        ...prev,
+        qcPlans: prev.qcPlans.map((q) =>
+          q.id === id ? { ...q, status: 'RELEASED' as const, approvedBy: prev.currentUser.name } : q
+        ),
+      }));
+      addNotification('success', `QC Plan approved and released.`);
+    },
+    [addNotification]
+  );
+
+  // ============================================================================
+  // 32. PHASE 9: PPIC PLANNING, FINITE CAPACITY & SCHEDULING ACTIONS
+  // ============================================================================
+  const createProductionPlan = useCallback(
+    (planData: Partial<ProductionPlanItem>) => {
+      const planSeq = (state.productionPlans.length + 1).toString().padStart(2, '0');
+      const planNumber = planData.planNumber || `PLAN-2026-W43-${planSeq}`;
+      const product = state.products.find((p) => p.id === planData.productId || p.sku === planData.productSku) || state.products[0];
+      const demandQty = planData.demandQty || 5000;
+      const plannedQty = planData.plannedQty !== undefined ? planData.plannedQty : demandQty;
+      const unfulfilledQty = Math.max(0, demandQty - plannedQty);
+
+      // Check BOM explosion
+      const bomNode = explodeMultiLevelBom(product.id, demandQty, state.products, state.boms);
+      const flat = bomNode ? [bomNode, ...(bomNode.children || [])] : [];
+      const shortages = flat.filter((n) => n.shortageQty > 0);
+
+      // Check routing & machine load
+      const routing = state.routings.find((r) => r.productId === product.id || r.productSku === product.sku) || state.routings[0];
+      const op10 = routing?.operations[0];
+      const cycleTime = op10 ? op10.runTimeSecondsPerUnit : 30;
+      const { pcsPerHour } = calculateOutputRate(cycleTime);
+      const m01 = state.machines.find((m) => m.code === 'M01') || state.machines[0];
+      const machineUnits = m01 ? m01.availableUnits : 3;
+      const dailyCap = Math.round(machineUnits * 8 * pcsPerHour * (m01 ? m01.efficiencyRate : 0.85));
+      const machineDeficitHours = Math.max(0, (demandQty - dailyCap) / (pcsPerHour * 0.85));
+
+      const feasibility = evaluateProductionFeasibility(
+        shortages.length,
+        machineDeficitHours,
+        2 // e.g. 2 operators deficit when 6 needed vs 4 available
+      );
+
+      const newPlan: ProductionPlanItem = {
+        id: `plan-${Date.now()}`,
+        planNumber,
+        periodWeek: planData.periodWeek || 'Week 43 - Oct 2026',
+        demandRef: planData.demandRef || 'DEM-2026-5001',
+        productId: product.id,
+        productSku: product.sku,
+        productName: product.name,
+        demandQty,
+        plannedQty,
+        unfulfilledQty,
+        feasibility: feasibility.overallState,
+        constraintNotes: feasibility.summaryMessage,
+        targetStartDate: planData.targetStartDate || '2026-10-26',
+        targetEndDate: planData.targetEndDate || '2026-10-30',
+        status: planData.status || 'FEASIBILITY_REVIEW',
+      };
+
+      const audit: AuditLogEntry = {
+        id: `aud-${Date.now()}`,
+        documentId: planNumber,
+        documentType: 'PRODUCTION_PLAN',
+        action: 'CREATE_PLAN',
+        actor: state.currentUser.name,
+        role: state.currentUser.role,
+        timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
+        newStatus: newPlan.status,
+        decision: 'EXECUTED',
+        reason: `Generated Master Production Plan ${planNumber}. Feasibility: ${newPlan.feasibility} (${feasibility.summaryMessage})`,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        productionPlans: [newPlan, ...prev.productionPlans],
+        auditLogs: [audit, ...prev.auditLogs],
+      }));
+
+      addNotification(
+        newPlan.feasibility === 'FEASIBLE' ? 'success' : 'warning',
+        `Created Production Plan ${planNumber} (${newPlan.feasibility}).`
+      );
+      return newPlan;
+    },
+    [state.productionPlans.length, state.products, state.boms, state.routings, state.machines, state.currentUser, addNotification]
+  );
+
+  const updateProductionPlan = useCallback(
+    (planId: string, updates: Partial<ProductionPlanItem>) => {
+      setState((prev) => ({
+        ...prev,
+        productionPlans: prev.productionPlans.map((p) =>
+          p.id === planId ? { ...p, ...updates } : p
+        ),
+      }));
+      addNotification('info', `Updated Production Plan ${planId}.`);
+    },
+    [addNotification]
+  );
+
+  const generateWorkOrderFromPlan = useCallback(
+    (planId: string): { success: boolean; orderId?: string; error?: string } => {
+      const plan = state.productionPlans.find((p) => p.id === planId);
+      if (!plan) return { success: false, error: 'Plan not found.' };
+
+      // Rule 1: Production cannot be scheduled without active routing!
+      const routing = state.routings.find(
+        (r) => (r.productId === plan.productId || r.productSku === plan.productSku) && r.status === 'ACTIVE'
+      );
+      if (!routing) {
+        const err = `Rule 1 Violation: Cannot generate Work Order for ${plan.productSku} without an ACTIVE routing.`;
+        addNotification('error', err);
+        return { success: false, error: err };
+      }
+
+      const mo = createProductionOrder({
+        productId: plan.productId,
+        quantity: plan.plannedQty,
+        dueDate: plan.targetEndDate,
+      });
+
+      if (mo) {
+        setState((prev) => ({
+          ...prev,
+          productionPlans: prev.productionPlans.map((p) =>
+            p.id === planId ? { ...p, status: 'DISPATCHED' as const, generatedWorkOrderId: mo.id } : p
+          ),
+        }));
+        addNotification('success', `Dispatched Work Order ${mo.orderNumber} from Plan ${plan.planNumber}. BOM & Routing revisions snapshot frozen per Rule 10.`);
+        return { success: true, orderId: mo.id };
+      }
+      return { success: false, error: 'Failed to create production order.' };
+    },
+    [state.productionPlans, state.routings, createProductionOrder, addNotification]
+  );
+
+  const runFiniteScheduling = useCallback(
+    (options?: { startDate?: string; shiftStartTime?: string; shiftHours?: number }) => {
+      const targetDemand = state.demands.find((d) => d.productSku === 'FG-001') || state.demands[0];
+      const product = state.products.find((p) => p.id === targetDemand.productId || p.sku === targetDemand.productSku) || state.products[0];
+      const routing = state.routings.find((r) => r.productId === product.id || r.productSku === product.sku) || state.routings[0];
+
+      const slots = generateFiniteScheduleSlots(
+        targetDemand,
+        product,
+        routing,
+        state.machines,
+        state.manpower,
+        state.changeoverMatrix,
+        {
+          startDate: options?.startDate || '2026-10-26',
+          shiftStartTime: options?.shiftStartTime || '07:00',
+          shiftHours: options?.shiftHours || 8,
+        }
+      );
+
+      setState((prev) => ({
+        ...prev,
+        finiteSchedules: slots,
+      }));
+
+      const conflictCount = slots.filter((s) => s.status === 'CONFLICT' || s.status === 'BLOCKED').length;
+      if (conflictCount > 0) {
+        addNotification('warning', `Finite scheduling completed with ${conflictCount} resource exception(s) detected (Manpower/Machine constraints active).`);
+      } else {
+        addNotification('success', `Finite scheduling completed: Generated ${slots.length} feasible, non-overlapping sequence slots.`);
+      }
+      return slots;
+    },
+    [state.demands, state.products, state.routings, state.machines, state.manpower, state.changeoverMatrix, addNotification]
+  );
+
+  const simulateWhatIfScenario = useCallback(
+    (customOverrides?: any) => {
+      const routing = state.routings.find((r) => r.productSku === 'FG-001') || state.routings[0];
+      const scenarios = runWhatIfSimulation(
+        'FG-001',
+        5000,
+        '2026-10-30',
+        state.machines,
+        routing,
+        [
+          { name: 'Scenario A: Baseline (2 Machines, 8h Shift)', description: 'Baseline single-shift capacity allocation', machineQuantityOverride: 2, shiftHours: 8, extraShift: false },
+          { name: 'Scenario B: +1 Machine (3 Machines M01, 8h Shift)', description: 'Activate 3rd machine to increase throughput', machineQuantityOverride: 3, shiftHours: 8, extraShift: false },
+          { name: 'Scenario C: 2 Machines + Overtime (10h Shift)', description: 'Authorize 2h daily overtime on 2 machines', machineQuantityOverride: 2, shiftHours: 10, extraShift: false },
+        ]
+      );
+
+      setState((prev) => ({
+        ...prev,
+        whatIfScenarios: scenarios,
+      }));
+      addNotification('info', `What-If Simulation recomputed: Evaluated ${scenarios.length} capacity scenarios against Section 41 demand.`);
+      return scenarios;
+    },
+    [state.routings, state.machines, addNotification]
+  );
+
+  const addMachine = useCallback(
+    (machineData: Partial<MachineMaster>) => {
+      const newMachine: MachineMaster = {
+        id: `mac-${Date.now()}`,
+        code: machineData.code || `M0${state.machines.length + 1}`,
+        name: machineData.name || 'New Machine Station',
+        workCenterId: machineData.workCenterId || 'wc-m01',
+        workCenterCode: machineData.workCenterCode || 'WC-M01',
+        department: machineData.department || 'Fabrication',
+        availableUnits: machineData.availableUnits || 1,
+        standardCycleTimeSeconds: machineData.standardCycleTimeSeconds || 30,
+        efficiencyRate: machineData.efficiencyRate || 0.85,
+        availabilityRate: machineData.availabilityRate || 0.95,
+        performanceRate: machineData.performanceRate || 0.92,
+        qualityRate: machineData.qualityRate || 0.98,
+        hourlyCostRate: machineData.hourlyCostRate || 50.0,
+        status: machineData.status || 'OPERATIONAL',
+        notes: machineData.notes,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        machines: [...prev.machines, newMachine],
+      }));
+      addNotification('success', `Registered machine: ${newMachine.code} (${newMachine.name}).`);
+      return newMachine;
+    },
+    [state.machines.length, addNotification]
+  );
+
+  const updateMachineStatus = useCallback(
+    (id: string, status: MachineStatus) => {
+      setState((prev) => ({
+        ...prev,
+        machines: prev.machines.map((m) => (m.id === id ? { ...m, status } : m)),
+      }));
+      addNotification('info', `Machine status updated to ${status}. ${status === 'MAINTENANCE' ? 'Capacity blocked per Rule 9.' : ''}`);
+    },
+    [addNotification]
+  );
+
+  const addEmployee = useCallback(
+    (empData: Partial<EmployeeManpower>) => {
+      const newEmp: EmployeeManpower = {
+        id: `emp-${Date.now()}`,
+        employeeCode: empData.employeeCode || `EMP-00${state.manpower.length + 1}`,
+        name: empData.name || 'New Operator',
+        role: empData.role || 'Machine Operator',
+        department: empData.department || 'Fabrication',
+        skills: empData.skills || [{ skillName: 'Machine Operation', level: 3 }],
+        qualifiedWorkCenters: empData.qualifiedWorkCenters || ['WC-M01'],
+        assignedShiftId: empData.assignedShiftId || 'SHIFT-1',
+        dailyWorkingHours: empData.dailyWorkingHours || 8,
+        overtimeCapable: empData.overtimeCapable !== undefined ? empData.overtimeCapable : true,
+        maxOvertimeHoursPerWeek: empData.maxOvertimeHoursPerWeek || 8,
+        status: empData.status || 'AVAILABLE',
+      };
+
+      setState((prev) => ({
+        ...prev,
+        manpower: [...prev.manpower, newEmp],
+      }));
+      addNotification('success', `Added operator: ${newEmp.name} (${newEmp.employeeCode}).`);
+      return newEmp;
+    },
+    [state.manpower.length, addNotification]
+  );
+
+  const updateEmployeeStatus = useCallback(
+    (id: string, status: EmployeeManpower['status']) => {
+      setState((prev) => ({
+        ...prev,
+        manpower: prev.manpower.map((e) => (e.id === id ? { ...e, status } : e)),
+      }));
+      addNotification('info', `Operator status changed to ${status}.`);
+    },
+    [addNotification]
+  );
+
+  const updateChangeoverRule = useCallback(
+    (fromProductSku: string, toProductSku: string, changeoverMinutes: number) => {
+      setState((prev) => {
+        const exists = prev.changeoverMatrix.some(
+          (r) => r.fromProductSku === fromProductSku && r.toProductSku === toProductSku
+        );
+        let updated: ChangeoverRule[];
+        if (exists) {
+          updated = prev.changeoverMatrix.map((r) =>
+            r.fromProductSku === fromProductSku && r.toProductSku === toProductSku
+              ? { ...r, changeoverMinutes }
+              : r
+          );
+        } else {
+          updated = [
+            ...prev.changeoverMatrix,
+            {
+              id: `co-${Date.now()}`,
+              fromProductSku,
+              toProductSku,
+              changeoverMinutes,
+              cleaningRequired: changeoverMinutes > 20,
+              toolingChangeRequired: changeoverMinutes > 30,
+            },
+          ];
+        }
+        return {
+          ...prev,
+          changeoverMatrix: updated,
+        };
+      });
+      addNotification('info', `Changeover between ${fromProductSku} and ${toProductSku} updated to ${changeoverMinutes} mins.`);
     },
     [addNotification]
   );
@@ -1633,5 +2967,44 @@ export function useErpStore() {
     toggleBusinessRule,
     createSubcontractOrder,
     receiveSubcontractOrder,
+    // Phase 8: NPI & Product Lifecycle
+    createNpiProject,
+    updateNpiProject,
+    updateNpiMilestone,
+    runProductionReadinessCheck,
+    recordNpiTrialRun,
+    recordNpiPilotRun,
+    createProductRelease,
+    // Phase 8: Material Request & Line Delivery
+    createMaterialRequest,
+    pickMaterialRequest,
+    deliverMaterialRequestToLine,
+    // Phase 8: Engineering Change Management (ECR/ECO)
+    createEngineeringChangeRequest,
+    decideOpenWorkOrderEcr,
+    approveEngineeringChange,
+    releaseEngineeringChange,
+    // Phase 8: Tooling, Drawings, WI, QC Plans
+    createToolingItem,
+    updateToolingStatus,
+    createEngineeringDrawing,
+    approveEngineeringDrawing,
+    createEngineeringSpecification,
+    approveEngineeringSpecification,
+    createWorkInstruction,
+    approveWorkInstruction,
+    createQcPlan,
+    approveQcPlan,
+    // Phase 9: PPIC Planning, Finite Capacity & Scheduling
+    createProductionPlan,
+    updateProductionPlan,
+    generateWorkOrderFromPlan,
+    runFiniteScheduling,
+    simulateWhatIfScenario,
+    addMachine,
+    updateMachineStatus,
+    addEmployee,
+    updateEmployeeStatus,
+    updateChangeoverRule,
   };
 }
