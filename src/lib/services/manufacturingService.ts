@@ -113,14 +113,56 @@ import {
   calculateRequiredMachineHours,
   calculateManpowerRequirement,
   explodeMultiLevelBom,
-  calculateChangeoverTime,
   analyzeBottlenecks,
   evaluateProductionFeasibility,
+} from '../../modules/planning/planningService';
+import {
+  calculateChangeoverTime,
   generateFiniteScheduleSlots,
-  runWhatIfSimulation,
-} from './ppicService';
-
-const STORAGE_KEY = 'kranex_mfg_erp_platform_v4';
+} from '../../modules/scheduling/schedulingService';
+import { buildWhatIfScenarios } from '../../modules/scheduling/whatIfScenarioFactory';
+import {
+  runTestingScenario as executeTestingScenario,
+  summarizeTestingMatrix,
+} from '../../modules/testing/testingService';
+import {
+  LEGACY_ERP_STORAGE_KEY,
+  UI_PREFERENCES_STORAGE_KEY,
+  loadLegacyErpState,
+  loadUiPreferences,
+  saveLegacyErpState,
+  saveUiPreferences,
+} from '../persistence/erpStorageAdapter';
+import { checkMaterialAvailability as checkMaterialAvailabilityForBom } from '../../modules/manufacturing/productionService';
+import { evaluateProductionRelease } from '../../modules/manufacturing/productionReleaseService';
+import { buildProductionOrderDraft } from '../../modules/manufacturing/productionOrderFactory';
+import { evaluateProductionReadiness } from '../../modules/manufacturing/productionReadinessEvaluator';
+import {
+  releaseProductionOrderForExecution,
+  startProductionOperation,
+  completeProductionOperation,
+  closeProductionOrderExecution,
+  reportProductionOutputForExecution,
+} from '../../modules/manufacturing/productionExecutionService';
+import {
+  reportMachineBreakdown as reportMachineBreakdownInDomain,
+  resolveMachineBreakdown as resolveMachineBreakdownInDomain,
+} from '../../modules/manufacturing/machineDowntimeService';
+import { issueMaterialToProduction as issueMaterialToProductionForInventory } from '../../modules/inventory/inventoryService';
+import { evaluateMaterialRequestDelivery } from '../../modules/inventory/materialRequestService';
+import { buildProductionPlanFromDemand } from '../../modules/planning/productionPlanFactory';
+import { dispatchProductionPlan } from '../../modules/planning/productionPlanDispatchService';
+import { buildFiniteScheduleFromDemand } from '../../modules/scheduling/finiteScheduleFactory';
+import {
+  createMaterialRequest as createMaterialRequestInDomain,
+  pickMaterialRequest as pickMaterialRequestInDomain,
+} from '../../modules/manufacturing/materialRequestLifecycleService';
+import {
+  evaluatePurchaseOrderDraft,
+  evaluatePurchaseRequisitionApproval,
+  rejectPurchaseRequisitionDecision,
+} from '../../modules/procurement/procurementService';
+import { evaluateGoodsReceipt } from '../../modules/procurement/goodsReceiptService';
 
 export interface ErpState {
   products: Product[];
@@ -176,56 +218,10 @@ export interface ErpState {
 }
 
 const getInitialState = (): ErpState => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return {
-        ...parsed,
-        products: parsed.products?.length ? parsed.products : INITIAL_PRODUCTS,
-        suppliers: parsed.suppliers?.length ? parsed.suppliers : INITIAL_SUPPLIERS,
-        purchaseRequisitions: parsed.purchaseRequisitions?.length ? parsed.purchaseRequisitions : INITIAL_PURCHASE_REQUISITIONS,
-        purchaseOrders: parsed.purchaseOrders?.length ? parsed.purchaseOrders : INITIAL_PURCHASE_ORDERS,
-        goodsReceiptNotes: parsed.goodsReceiptNotes?.length ? parsed.goodsReceiptNotes : INITIAL_GOODS_RECEIPTS,
-        featureRegistry: parsed.featureRegistry?.length ? parsed.featureRegistry : INITIAL_FEATURE_REGISTRY,
-        customFields: parsed.customFields?.length ? parsed.customFields : INITIAL_CUSTOM_FIELDS,
-        workflows: parsed.workflows?.length ? parsed.workflows : INITIAL_WORKFLOWS,
-        businessRules: parsed.businessRules?.length ? parsed.businessRules : INITIAL_BUSINESS_RULES,
-        subcontractOrders: parsed.subcontractOrders?.length ? parsed.subcontractOrders : INITIAL_SUBCONTRACT_ORDERS,
-        // Phase 8 additions
-        drawings: parsed.drawings?.length ? parsed.drawings : INITIAL_DRAWINGS,
-        specifications: parsed.specifications?.length ? parsed.specifications : INITIAL_SPECIFICATIONS,
-        toolingItems: parsed.toolingItems?.length ? parsed.toolingItems : INITIAL_TOOLING_ITEMS,
-        workInstructions: parsed.workInstructions?.length ? parsed.workInstructions : INITIAL_WORK_INSTRUCTIONS,
-        qcPlans: parsed.qcPlans?.length ? parsed.qcPlans : INITIAL_QC_PLANS,
-        materialRequests: parsed.materialRequests?.length ? parsed.materialRequests : INITIAL_MATERIAL_REQUESTS,
-        readinessReports: parsed.readinessReports || INITIAL_PRODUCTION_READINESS,
-        npiProjects: parsed.npiProjects?.length ? parsed.npiProjects : INITIAL_NPI_PROJECTS,
-        productReleases: parsed.productReleases?.length ? parsed.productReleases : INITIAL_RELEASE_PACKAGES,
-        engineeringChanges: parsed.engineeringChanges?.length ? parsed.engineeringChanges : INITIAL_ENGINEERING_CHANGES,
-        // Phase 9 additions
-        machines: parsed.machines?.length ? parsed.machines : INITIAL_MACHINES,
-        manpower: parsed.manpower?.length ? parsed.manpower : INITIAL_MANPOWER,
-        productionCalendars: parsed.productionCalendars?.length ? parsed.productionCalendars : INITIAL_CALENDARS,
-        productionShifts: parsed.productionShifts?.length ? parsed.productionShifts : INITIAL_SHIFTS,
-        changeoverMatrix: parsed.changeoverMatrix?.length ? parsed.changeoverMatrix : INITIAL_CHANGEOVER_RULES,
-        productionPlans: parsed.productionPlans?.length ? parsed.productionPlans : INITIAL_PRODUCTION_PLANS,
-        finiteSchedules: parsed.finiteSchedules?.length ? parsed.finiteSchedules : INITIAL_FINITE_SCHEDULES,
-        whatIfScenarios: parsed.whatIfScenarios?.length ? parsed.whatIfScenarios : INITIAL_WHAT_IF_SCENARIOS,
-        testingScenarios: INITIAL_TESTING_SCENARIOS, // Always keep up-to-date scenarios
-        customValues: parsed.customValues || {
-          'prd-001': { materialGrade: 'AISI 304 / AL 6061', thicknessMm: 2.5, rohsCompliant: true, drawingNumber: 'DWG-KRX-2026-08' },
-          'mo-124': { customerProject: 'PRJ-AEROSPACE-90', priorityReason: 'Standard Schedule', targetProductionLine: 'Cell A - High Precision' },
-        },
-        selectedPlant: 'PLANT-01',
-        activeOrderFilter: 'ALL',
-        currentUser: parsed.currentUser || { id: 'usr-001', name: 'Dewi Lestari', role: 'PPIC Supervisor' },
-      };
-    }
-  } catch {
-    // fallback
-  }
-  return {
+  const uiPreferences = loadUiPreferences();
+  const legacyState = loadLegacyErpState() as Partial<ErpState> | null;
+
+  const baseState: ErpState = {
     products: INITIAL_PRODUCTS,
     boms: INITIAL_BOMS,
     routings: INITIAL_ROUTINGS,
@@ -251,7 +247,6 @@ const getInitialState = (): ErpState => {
     workflows: INITIAL_WORKFLOWS,
     businessRules: INITIAL_BUSINESS_RULES,
     subcontractOrders: INITIAL_SUBCONTRACT_ORDERS,
-    // Phase 8 additions
     drawings: INITIAL_DRAWINGS,
     specifications: INITIAL_SPECIFICATIONS,
     toolingItems: INITIAL_TOOLING_ITEMS,
@@ -262,7 +257,6 @@ const getInitialState = (): ErpState => {
     npiProjects: INITIAL_NPI_PROJECTS,
     productReleases: INITIAL_RELEASE_PACKAGES,
     engineeringChanges: INITIAL_ENGINEERING_CHANGES,
-    // Phase 9 additions
     machines: INITIAL_MACHINES,
     manpower: INITIAL_MANPOWER,
     productionCalendars: INITIAL_CALENDARS,
@@ -275,9 +269,9 @@ const getInitialState = (): ErpState => {
       'prd-001': { materialGrade: 'AISI 304 / AL 6061', thicknessMm: 2.5, rohsCompliant: true, drawingNumber: 'DWG-KRX-2026-08' },
       'mo-124': { customerProject: 'PRJ-AEROSPACE-90', priorityReason: 'Standard Schedule', targetProductionLine: 'Cell A - High Precision' },
     },
-    selectedPlant: 'PLANT-01',
-    activeOrderFilter: 'ALL',
-    currentUser: { id: 'usr-001', name: 'Dewi Lestari', role: 'PPIC Supervisor' },
+    selectedPlant: uiPreferences.selectedPlant,
+    activeOrderFilter: uiPreferences.activeOrderFilter,
+    currentUser: uiPreferences.currentUser,
     notifications: [
       {
         id: 'notif-p92',
@@ -287,17 +281,64 @@ const getInitialState = (): ErpState => {
       },
     ],
   };
+
+  if (!legacyState) {
+    return baseState;
+  }
+
+  return {
+    ...baseState,
+    ...legacyState,
+    products: Array.isArray(legacyState.products) && legacyState.products.length ? legacyState.products : baseState.products,
+    suppliers: Array.isArray(legacyState.suppliers) && legacyState.suppliers.length ? legacyState.suppliers : baseState.suppliers,
+    purchaseRequisitions: Array.isArray(legacyState.purchaseRequisitions) && legacyState.purchaseRequisitions.length ? legacyState.purchaseRequisitions : baseState.purchaseRequisitions,
+    purchaseOrders: Array.isArray(legacyState.purchaseOrders) && legacyState.purchaseOrders.length ? legacyState.purchaseOrders : baseState.purchaseOrders,
+    goodsReceiptNotes: Array.isArray(legacyState.goodsReceiptNotes) && legacyState.goodsReceiptNotes.length ? legacyState.goodsReceiptNotes : baseState.goodsReceiptNotes,
+    featureRegistry: Array.isArray(legacyState.featureRegistry) && legacyState.featureRegistry.length ? legacyState.featureRegistry : baseState.featureRegistry,
+    customFields: Array.isArray(legacyState.customFields) && legacyState.customFields.length ? legacyState.customFields : baseState.customFields,
+    workflows: Array.isArray(legacyState.workflows) && legacyState.workflows.length ? legacyState.workflows : baseState.workflows,
+    businessRules: Array.isArray(legacyState.businessRules) && legacyState.businessRules.length ? legacyState.businessRules : baseState.businessRules,
+    subcontractOrders: Array.isArray(legacyState.subcontractOrders) && legacyState.subcontractOrders.length ? legacyState.subcontractOrders : baseState.subcontractOrders,
+    drawings: Array.isArray(legacyState.drawings) && legacyState.drawings.length ? legacyState.drawings : baseState.drawings,
+    specifications: Array.isArray(legacyState.specifications) && legacyState.specifications.length ? legacyState.specifications : baseState.specifications,
+    toolingItems: Array.isArray(legacyState.toolingItems) && legacyState.toolingItems.length ? legacyState.toolingItems : baseState.toolingItems,
+    workInstructions: Array.isArray(legacyState.workInstructions) && legacyState.workInstructions.length ? legacyState.workInstructions : baseState.workInstructions,
+    qcPlans: Array.isArray(legacyState.qcPlans) && legacyState.qcPlans.length ? legacyState.qcPlans : baseState.qcPlans,
+    materialRequests: Array.isArray(legacyState.materialRequests) && legacyState.materialRequests.length ? legacyState.materialRequests : baseState.materialRequests,
+    readinessReports: legacyState.readinessReports || baseState.readinessReports,
+    npiProjects: Array.isArray(legacyState.npiProjects) && legacyState.npiProjects.length ? legacyState.npiProjects : baseState.npiProjects,
+    productReleases: Array.isArray(legacyState.productReleases) && legacyState.productReleases.length ? legacyState.productReleases : baseState.productReleases,
+    engineeringChanges: Array.isArray(legacyState.engineeringChanges) && legacyState.engineeringChanges.length ? legacyState.engineeringChanges : baseState.engineeringChanges,
+    machines: Array.isArray(legacyState.machines) && legacyState.machines.length ? legacyState.machines : baseState.machines,
+    manpower: Array.isArray(legacyState.manpower) && legacyState.manpower.length ? legacyState.manpower : baseState.manpower,
+    productionCalendars: Array.isArray(legacyState.productionCalendars) && legacyState.productionCalendars.length ? legacyState.productionCalendars : baseState.productionCalendars,
+    productionShifts: Array.isArray(legacyState.productionShifts) && legacyState.productionShifts.length ? legacyState.productionShifts : baseState.productionShifts,
+    changeoverMatrix: Array.isArray(legacyState.changeoverMatrix) && legacyState.changeoverMatrix.length ? legacyState.changeoverMatrix : baseState.changeoverMatrix,
+    productionPlans: Array.isArray(legacyState.productionPlans) && legacyState.productionPlans.length ? legacyState.productionPlans : baseState.productionPlans,
+    finiteSchedules: Array.isArray(legacyState.finiteSchedules) && legacyState.finiteSchedules.length ? legacyState.finiteSchedules : baseState.finiteSchedules,
+    whatIfScenarios: Array.isArray(legacyState.whatIfScenarios) && legacyState.whatIfScenarios.length ? legacyState.whatIfScenarios : baseState.whatIfScenarios,
+    testingScenarios: baseState.testingScenarios,
+    customValues: legacyState.customValues || baseState.customValues,
+    selectedPlant: uiPreferences.selectedPlant,
+    activeOrderFilter: uiPreferences.activeOrderFilter,
+    currentUser: uiPreferences.currentUser,
+    notifications: Array.isArray(legacyState.notifications) && legacyState.notifications.length ? legacyState.notifications : baseState.notifications,
+  };
 };
 
 export function useErpStore() {
   const [state, setState] = useState<ErpState>(getInitialState);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      // ignore
-    }
+    // Temporary migration adapter: the ERP state is still persisted locally while
+    // the backend repository layer and database-backed source of truth are introduced.
+    saveLegacyErpState(state as unknown as Record<string, unknown>);
+    saveUiPreferences({
+      selectedPlant: state.selectedPlant,
+      activeOrderFilter: state.activeOrderFilter,
+      currentUser: state.currentUser,
+      notifications: state.notifications,
+    });
   }, [state]);
 
   const addNotification = useCallback((type: 'info' | 'success' | 'warning' | 'error', message: string) => {
@@ -342,32 +383,7 @@ export function useErpStore() {
   // 1. checkMaterialAvailability (Page 93)
   const checkMaterialAvailability = useCallback((productId: string, quantity: number) => {
     const bom = state.boms.find((b) => b.productId === productId && b.status === 'ACTIVE');
-    if (!bom) return { availabilityPct: 100, shortages: [] };
-
-    let totalWeight = 0;
-    let fulfilledWeight = 0;
-    const shortages: { sku: string; required: number; available: number }[] = [];
-
-    for (const comp of bom.components) {
-      const prod = state.products.find((p) => p.id === comp.componentProductId);
-      const required = quantity * comp.quantityPerUnit;
-      const unallocated = prod ? Math.max(0, prod.currentStock - prod.allocatedStock) : 0;
-      totalWeight += required;
-
-      if (unallocated >= required) {
-        fulfilledWeight += required;
-      } else {
-        fulfilledWeight += unallocated;
-        shortages.push({
-          sku: comp.componentSku,
-          required,
-          available: unallocated,
-        });
-      }
-    }
-
-    const availabilityPct = totalWeight > 0 ? Math.round((fulfilledWeight / totalWeight) * 100) : 100;
-    return { availabilityPct, shortages };
+    return checkMaterialAvailabilityForBom(state.products, bom, quantity);
   }, [state.boms, state.products]);
 
   // 2. releaseProductionOrder (Page 93 & Page 112)
@@ -375,48 +391,16 @@ export function useErpStore() {
     setState((prev) => {
       const order = prev.productionOrders.find((o) => o.id === orderId);
       if (!order) return prev;
-      if (order.status !== 'PLANNED' && order.status !== 'DRAFT') return prev;
 
-      // Check shortage
-      const hasShortage = order.materials.some((m) => m.status === 'SHORTAGE');
-      if (hasShortage && !overrideReason) {
-        // Warning notification
+      const decision = releaseProductionOrderForExecution(order, prev.currentUser.name, prev.currentUser.role, overrideReason);
+      if (!decision.allowed || !decision.updatedOrder || !decision.auditLog) {
         return prev;
       }
 
-      const now = new Date();
-      const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-
-      // Update operations: first operation becomes READY
-      const updatedOperations = order.operations.map((op, idx) => ({
-        ...op,
-        status: idx === 0 ? ('READY' as const) : ('PENDING' as const),
-      }));
-
-      const updatedOrder: ProductionOrder = {
-        ...order,
-        status: 'RELEASED',
-        operations: updatedOperations,
-      };
-
-      const audit: AuditLogEntry = {
-        id: `aud-${Date.now()}`,
-        documentId: order.orderNumber,
-        documentType: 'PRODUCTION_ORDER',
-        action: overrideReason ? 'RELEASE_WITH_OVERRIDE' : 'RELEASE_PRODUCTION_ORDER',
-        actor: prev.currentUser.name,
-        role: prev.currentUser.role,
-        timestamp: timeStr,
-        oldStatus: order.status,
-        newStatus: 'RELEASED',
-        decision: 'APPROVED',
-        reason: overrideReason || 'Standard production order release after availability check.',
-      };
-
       return {
         ...prev,
-        productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? updatedOrder : o)),
-        auditLogs: [audit, ...prev.auditLogs],
+        productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? decision.updatedOrder! : o)),
+        auditLogs: [decision.auditLog, ...prev.auditLogs],
       };
     });
 
@@ -429,70 +413,31 @@ export function useErpStore() {
       const order = prev.productionOrders.find((o) => o.id === orderId);
       if (!order) return prev;
 
-      const op = order.operations.find((o) => o.sequence === operationSequence);
-      if (!op) return prev;
-
-      // Check dependency (Page 96: Cutting must finish before Assembly!)
-      if (op.dependencySeq) {
-        const predecessor = order.operations.find((o) => o.sequence === op.dependencySeq);
-        if (predecessor && predecessor.status !== 'COMPLETED') {
-          return prev;
-        }
+      const decision = startProductionOperation(order, operationSequence, operatorName);
+      if (!decision.allowed || !decision.updatedOrder || !decision.auditLog) {
+        return prev;
       }
 
-      const now = new Date();
-      const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-
-      const updatedOperations = order.operations.map((o) => {
-        if (o.sequence === operationSequence) {
-          return {
-            ...o,
-            status: 'IN_PROGRESS' as const,
-            startedAt: timeStr,
-            assignedOperator: operatorName,
-          };
-        }
-        return o;
-      });
-
-      const updatedWorkCenters = prev.workCenters.map((wc) => {
-        if (wc.id === op.workCenterId) {
-          return {
-            ...wc,
-            status: 'RUNNING' as const,
-            currentWorkOrderId: op.workOrderNo,
-            currentOperator: operatorName,
-          };
-        }
-        return wc;
-      });
-
-      const updatedOrder: ProductionOrder = {
-        ...order,
-        status: order.status === 'RELEASED' ? 'IN_PROGRESS' : order.status,
-        actualStartDate: order.actualStartDate || timeStr,
-        operations: updatedOperations,
-      };
-
-      const audit: AuditLogEntry = {
-        id: `aud-${Date.now()}`,
-        documentId: op.workOrderNo,
-        documentType: 'WORK_ORDER',
-        action: 'START_WORK_ORDER',
-        actor: operatorName,
-        role: 'Operator',
-        timestamp: timeStr,
-        oldStatus: op.status,
-        newStatus: 'IN_PROGRESS',
-        decision: 'EXECUTED',
-        reason: `Started operation ${op.operationCode} on ${op.workCenterCode}.`,
-      };
+      const op = order.operations.find((o) => o.sequence === operationSequence);
+      const updatedWorkCenters = op
+        ? prev.workCenters.map((wc) => {
+            if (wc.id === op.workCenterId) {
+              return {
+                ...wc,
+                status: 'RUNNING' as const,
+                currentWorkOrderId: op.workOrderNo,
+                currentOperator: operatorName,
+              };
+            }
+            return wc;
+          })
+        : prev.workCenters;
 
       return {
         ...prev,
         workCenters: updatedWorkCenters,
-        productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? updatedOrder : o)),
-        auditLogs: [audit, ...prev.auditLogs],
+        productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? decision.updatedOrder! : o)),
+        auditLogs: [decision.auditLog, ...prev.auditLogs],
       };
     });
 
@@ -513,129 +458,25 @@ export function useErpStore() {
       const order = prev.productionOrders.find((o) => o.id === orderId);
       if (!order) return prev;
 
-      const op = order.operations.find((o) => o.sequence === operationSequence);
-      if (!op) return prev;
-
-      const now = new Date();
-      const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-
-      const newLog: OutputLogEntry = {
-        id: `log-${Date.now()}`,
-        timestamp: timeStr,
+      const decision = reportProductionOutputForExecution(
+        order,
         operationSequence,
-        operationName: op.name,
         goodQty,
         scrapQty,
         reasonCode,
         operator,
-        workCenterCode: op.workCenterCode,
-        notes: notes || 'Shop floor execution output report',
-      };
+        notes
+      );
 
-      const updatedCompleted = op.completedQty + goodQty;
-      const updatedScrap = op.scrapQty + scrapQty;
-      const isFinished = updatedCompleted >= op.targetQty;
-
-      // Unlock next operation if finished
-      let nextUnlocked = false;
-      const updatedOperations = order.operations.map((o, index) => {
-        if (o.sequence === operationSequence) {
-          return {
-            ...o,
-            completedQty: updatedCompleted,
-            scrapQty: updatedScrap,
-            status: isFinished ? ('COMPLETED' as const) : ('IN_PROGRESS' as const),
-            completedAt: isFinished ? timeStr : o.completedAt,
-          };
-        }
-        if (isFinished && !nextUnlocked && order.operations[index - 1]?.sequence === operationSequence) {
-          nextUnlocked = true;
-          return {
-            ...o,
-            status: o.status === 'PENDING' ? ('READY' as const) : o.status,
-          };
-        }
-        return o;
-      });
-
-      const isLastOp = operationSequence === order.operations[order.operations.length - 1]?.sequence;
-      const totalGood = isLastOp ? Math.min(order.targetQuantity, order.goodQuantity + goodQty) : order.goodQuantity;
-      const totalScrap = order.scrapQuantity + scrapQty;
-
-      // Page 94: Partial production & Backorder logic
-      // Remaining quantity stays open / backorder
-      const remainingBackorder = Math.max(0, order.targetQuantity - totalGood - totalScrap);
-
-      // Page 99: Immutable inventory movement posting
-      const newMovements: StockMovement[] = [];
-
-      // If last operation produced good units, post GR_PRODUCTION
-      if (isLastOp && goodQty > 0) {
-        newMovements.push({
-          id: `mov-${Date.now()}-fg`,
-          movementNo: `MATDOC-${Date.now().toString().slice(-6)}`,
-          timestamp: timeStr,
-          productId: order.productId,
-          sku: order.productSku,
-          quantity: goodQty,
-          uom: 'PCS',
-          fromLocation: `WIP-${op.workCenterCode}`,
-          toLocation: 'WH-FG-BAY-A1',
-          lotNumber: `LOT-FG-${now.getFullYear()}${now.getMonth() + 1}`,
-          sourceDocument: order.orderNumber,
-          movementType: 'GR_PRODUCTION',
-        });
+      if (!decision.allowed || !decision.updatedOrder || !decision.auditLog) {
+        return prev;
       }
-
-      // If scrap reported, post SCRAP movement (Page 105)
-      if (scrapQty > 0) {
-        newMovements.push({
-          id: `mov-${Date.now()}-scrap`,
-          movementNo: `MATDOC-SCRAP-${Date.now().toString().slice(-4)}`,
-          timestamp: timeStr,
-          productId: order.productId,
-          sku: order.productSku,
-          quantity: scrapQty,
-          uom: 'PCS',
-          fromLocation: `WIP-${op.workCenterCode}`,
-          toLocation: 'SCRAP-YARD',
-          lotNumber: `LOT-SCRAP-${order.orderNumber}`,
-          sourceDocument: order.orderNumber,
-          movementType: 'SCRAP',
-        });
-      }
-
-      const allDone = updatedOperations.every((o) => o.status === 'COMPLETED');
-
-      const updatedOrder: ProductionOrder = {
-        ...order,
-        goodQuantity: totalGood,
-        scrapQuantity: totalScrap,
-        backorderQty: remainingBackorder,
-        status: allDone ? 'COMPLETED' : order.status,
-        actualEndDate: allDone ? timeStr : order.actualEndDate,
-        operations: updatedOperations,
-        outputLogs: [newLog, ...order.outputLogs],
-        totalCostActual: order.totalCostActual + (goodQty * 120),
-      };
-
-      const audit: AuditLogEntry = {
-        id: `aud-${Date.now()}`,
-        documentId: order.orderNumber,
-        documentType: 'PRODUCTION_ORDER',
-        action: 'REPORT_OUTPUT',
-        actor: operator,
-        role: 'Operator',
-        timestamp: timeStr,
-        decision: 'EXECUTED',
-        reason: `Reported +${goodQty} Good, +${scrapQty} Scrap on Op ${op.operationCode}. Backorder remaining: ${remainingBackorder}.`,
-      };
 
       return {
         ...prev,
-        stockMovements: [...newMovements, ...prev.stockMovements],
-        productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? updatedOrder : o)),
-        auditLogs: [audit, ...prev.auditLogs],
+        stockMovements: [...(decision.stockMovements ?? []), ...prev.stockMovements],
+        productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? decision.updatedOrder! : o)),
+        auditLogs: [decision.auditLog, ...prev.auditLogs],
       };
     });
 
@@ -651,25 +492,10 @@ export function useErpStore() {
       const op = order.operations.find((o) => o.sequence === operationSequence);
       if (!op) return prev;
 
-      const now = new Date();
-      const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-
-      const updatedOperations = order.operations.map((o, idx) => {
-        if (o.sequence === operationSequence) {
-          return {
-            ...o,
-            status: 'COMPLETED' as const,
-            completedQty: Math.max(o.completedQty, o.targetQty),
-            completedAt: timeStr,
-          };
-        }
-        if (order.operations[idx - 1]?.sequence === operationSequence && o.status === 'PENDING') {
-          return { ...o, status: 'READY' as const };
-        }
-        return o;
-      });
-
-      const allDone = updatedOperations.every((o) => o.status === 'COMPLETED');
+      const decision = completeProductionOperation(order, operationSequence, prev.currentUser.name, prev.currentUser.role);
+      if (!decision.allowed || !decision.updatedOrder || !decision.auditLog) {
+        return prev;
+      }
 
       const updatedWorkCenters = prev.workCenters.map((wc) => {
         if (wc.id === op.workCenterId) {
@@ -683,32 +509,11 @@ export function useErpStore() {
         return wc;
       });
 
-      const updatedOrder: ProductionOrder = {
-        ...order,
-        status: allDone ? 'COMPLETED' : order.status,
-        actualEndDate: allDone ? timeStr : order.actualEndDate,
-        operations: updatedOperations,
-      };
-
-      const audit: AuditLogEntry = {
-        id: `aud-${Date.now()}`,
-        documentId: op.workOrderNo,
-        documentType: 'WORK_ORDER',
-        action: 'COMPLETE_OPERATION',
-        actor: prev.currentUser.name,
-        role: prev.currentUser.role,
-        timestamp: timeStr,
-        oldStatus: op.status,
-        newStatus: 'COMPLETED',
-        decision: 'EXECUTED',
-        reason: `Operation ${op.operationCode} completed. Next operation unlocked.`,
-      };
-
       return {
         ...prev,
         workCenters: updatedWorkCenters,
-        productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? updatedOrder : o)),
-        auditLogs: [audit, ...prev.auditLogs],
+        productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? decision.updatedOrder! : o)),
+        auditLogs: [decision.auditLog, ...prev.auditLogs],
       };
     });
 
@@ -721,32 +526,15 @@ export function useErpStore() {
       const order = prev.productionOrders.find((o) => o.id === orderId);
       if (!order) return prev;
 
-      const now = new Date();
-      const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-
-      const updatedOrder: ProductionOrder = {
-        ...order,
-        status: 'CLOSED',
-      };
-
-      const audit: AuditLogEntry = {
-        id: `aud-${Date.now()}`,
-        documentId: order.orderNumber,
-        documentType: 'PRODUCTION_ORDER',
-        action: 'CLOSE_PRODUCTION_ORDER',
-        actor: prev.currentUser.name,
-        role: 'Controller',
-        timestamp: timeStr,
-        oldStatus: order.status,
-        newStatus: 'CLOSED',
-        decision: 'APPROVED',
-        reason: 'Settled production actual costs, posted residual variances, closed order lifecycle.',
-      };
+      const decision = closeProductionOrderExecution(order, prev.currentUser.name, prev.currentUser.role);
+      if (!decision.allowed || !decision.updatedOrder || !decision.auditLog) {
+        return prev;
+      }
 
       return {
         ...prev,
-        productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? updatedOrder : o)),
-        auditLogs: [audit, ...prev.auditLogs],
+        productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? decision.updatedOrder! : o)),
+        auditLogs: [decision.auditLog, ...prev.auditLogs],
       };
     });
 
@@ -762,7 +550,6 @@ export function useErpStore() {
     const product = state.products.find((p) => p.id === data.productId);
     if (!product) return null;
 
-    // Strict Gate BR-NPI-001: Unreleased products under NPI cannot be released for normal production
     if (product.lifecycleStatus && product.lifecycleStatus !== 'RELEASED') {
       const errorMsg = `Action Blocked (BR-NPI-001): Product ${product.sku} is in '${product.lifecycleStatus}' stage. Normal commercial production orders can only be dispatched for products in 'RELEASED' status. To produce pre-production units, initiate an NPI Trial Run under NPI Management or approve the Product Release Package.`;
       addNotification('error', errorMsg);
@@ -771,93 +558,22 @@ export function useErpStore() {
 
     const bom = state.boms.find((b) => b.productId === data.productId && b.status === 'ACTIVE') || state.boms[0];
     const routing = state.routings.find((r) => r.productId === data.productId && r.status === 'ACTIVE') || state.routings[0];
-
-    // Snapshot official approved baseline release package if available
-    const activeRelease = state.productReleases?.find(
-      (r) => r.productId === product.id && r.status === 'ACTIVE'
-    );
-
+    const activeRelease = state.productReleases?.find((r) => r.productId === product.id && r.status === 'ACTIVE');
     const orderNum = `MO-2026-00${126 + state.productionOrders.length}`;
-    const today = new Date().toISOString().split('T')[0];
 
-    const materials = bom
-      ? bom.components.map((c) => {
-          const compProd = state.products.find((p) => p.id === c.componentProductId);
-          const req = data.quantity * c.quantityPerUnit;
-          const avail = compProd ? compProd.currentStock - compProd.allocatedStock : 0;
-          return {
-            productId: c.componentProductId,
-            sku: c.componentSku,
-            name: c.componentName,
-            requiredQty: req,
-            allocatedQty: 0,
-            consumedQty: 0,
-            availableStock: compProd ? compProd.currentStock : 0,
-            uom: c.uom,
-            unitCost: c.unitCost,
-            status: (avail >= req ? 'SUFFICIENT' : 'SHORTAGE') as 'SUFFICIENT' | 'SHORTAGE',
-          };
-        })
-      : [];
-
-    const operations = routing
-      ? routing.operations.map((op) => ({
-          id: `op-new-${Date.now()}-${op.sequence}`,
-          workOrderNo: `WO-${orderNum.split('-')[2]}-${op.sequence.toString().padStart(2, '0')}`,
-          sequence: op.sequence,
-          operationCode: op.operationCode,
-          name: op.name,
-          workCenterId: op.workCenterId,
-          workCenterCode: op.workCenterCode,
-          workCenterName: op.workCenterName,
-          status: 'PENDING' as const,
-          targetQty: data.quantity,
-          completedQty: 0,
-          scrapQty: 0,
-          plannedDurationMinutes: Math.ceil((op.runTimeSecondsPerUnit * data.quantity) / 60) + op.setupTimeMinutes,
-          actualDurationMinutes: 0,
-          downtimeMinutes: 0,
-          dependencySeq: op.dependencySeq,
-          setupTimeMinutes: op.setupTimeMinutes,
-          runTimeSecondsPerUnit: op.runTimeSecondsPerUnit,
-        }))
-      : [];
-
-    const newOrder: ProductionOrder = {
-      id: `mo-${Date.now()}`,
+    const newOrder = buildProductionOrderDraft({
+      product,
+      bom,
+      routing,
+      quantity: data.quantity,
+      dueDate: data.dueDate,
       orderNumber: orderNum,
-      productId: product.id,
-      productSku: product.sku,
-      productName: product.name,
-      targetQuantity: data.quantity,
-      goodQuantity: 0,
-      scrapQuantity: 0,
-      status: 'PLANNED',
-      bomId: bom?.id || 'bom-001',
-      bomCode: bom?.code || 'BOM-A',
-      bomRevision: activeRelease?.bomRevision || bom?.revision || 'Rev.03',
-      routingId: routing?.id || 'rt-001',
-      routingCode: routing?.code || 'ROUTE-A',
-      routingRevision: activeRelease?.routingRevision || routing?.revision || 'Rev.02',
-      productRevision: activeRelease?.releasedRevision || product.currentRevision || 'Rev A',
-      releasePackageId: activeRelease?.id,
-      wiRevision: activeRelease?.wiRevision || 'Rev A',
-      toolingRevision: activeRelease?.toolingRevision || 'Rev 01',
       plantId: 'PLANT-01',
       plantName: 'Cikarang Main Plant #1',
-      dueDate: data.dueDate,
-      plannedStartDate: today,
-      demandLink: 'SO-2026-881',
-      priority: 'NORMAL',
-      materialAvailabilityPct: 92,
-      operations,
-      materials,
-      outputLogs: [],
-      totalCostPlanned: data.quantity * product.standardCost,
-      totalCostActual: 0,
-      backorderQty: data.quantity,
-      createdAt: today,
-    };
+      releasePackage: activeRelease,
+      createdAt: new Date().toISOString().split('T')[0],
+      productCatalog: state.products,
+    });
 
     setState((prev) => ({
       ...prev,
@@ -875,30 +591,17 @@ export function useErpStore() {
     equipmentName: string,
     durationMinutes: number
   ) => {
-    const now = new Date();
-    const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-
-    const newEvent: DowntimeEvent = {
-      id: `dt-${Date.now()}`,
-      workCenterCode,
-      equipmentName,
-      status: 'DOWN',
-      startTime: timeStr,
-      durationMinutes,
-      reason,
-      maintenanceTicketNo: `MT-2026-${Math.floor(100 + Math.random() * 900)}`,
-      productionImpact: `Capacity loss of ${durationMinutes} mins recorded. Machine flagged DOWN.`,
-    };
+    const decision = reportMachineBreakdownInDomain(workCenterCode, reason, equipmentName, durationMinutes);
 
     setState((prev) => ({
       ...prev,
-      downtimeEvents: [newEvent, ...prev.downtimeEvents],
+      downtimeEvents: [decision.event, ...prev.downtimeEvents],
       workCenters: prev.workCenters.map((wc) =>
-        wc.code === workCenterCode ? { ...wc, status: 'DOWN' as const } : wc
+        wc.code === workCenterCode ? { ...wc, status: decision.workCenterStatus } : wc
       ),
     }));
 
-    addNotification('error', `Machine Breakdown flagged on ${workCenterCode}: ${reason}. Ticket ${newEvent.maintenanceTicketNo} opened.`);
+    addNotification('error', `Machine Breakdown flagged on ${workCenterCode}: ${reason}. Ticket ${decision.event.maintenanceTicketNo} opened.`);
   }, [addNotification]);
 
   // 9. resolveMachineBreakdown (Page 101)
@@ -907,16 +610,15 @@ export function useErpStore() {
       const evt = prev.downtimeEvents.find((e) => e.id === eventId);
       if (!evt) return prev;
 
-      const now = new Date();
-      const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      const decision = resolveMachineBreakdownInDomain(evt);
 
       return {
         ...prev,
         downtimeEvents: prev.downtimeEvents.map((e) =>
-          e.id === eventId ? { ...e, status: 'RESOLVED' as const, endTime: timeStr } : e
+          e.id === eventId ? decision.event : e
         ),
         workCenters: prev.workCenters.map((wc) =>
-          wc.code === evt.workCenterCode ? { ...wc, status: 'AVAILABLE' as const } : wc
+          wc.code === evt.workCenterCode ? { ...wc, status: decision.workCenterStatus } : wc
         ),
       };
     });
@@ -936,13 +638,7 @@ export function useErpStore() {
     setState((prev) => ({
       ...prev,
       testingScenarios: prev.testingScenarios.map((sc) =>
-        sc.id === scenarioId
-          ? {
-              ...sc,
-              status: 'PASSED' as const,
-              lastRunDetails: `Verified at ${new Date().toLocaleTimeString()}: Assertions validated against domain invariants.`,
-            }
-          : sc
+        sc.id === scenarioId ? executeTestingScenario(sc) : sc
       ),
     }));
     addNotification('success', `Testing Scenario ${scenarioId} executed successfully: Expected domain result validated.`);
@@ -1046,9 +742,10 @@ export function useErpStore() {
       const activeUser = approverName || state.currentUser.name;
       const activeRole = approverRole || state.currentUser.role;
 
-      // BR-PRC-002: Segregation of Duties (SoD) - Requester CANNOT self-approve
-      if (pr.requesterName.trim().toLowerCase() === activeUser.trim().toLowerCase()) {
-        const errorMsg = `Segregation of Duties Violation (BR-PRC-002): Requester (${pr.requesterName}) is not permitted to self-approve their own Purchase Requisition. Approval must be performed by an independent authorized manager.`;
+      const approvalGate = evaluatePurchaseRequisitionApproval(pr, activeUser, activeRole, 'Manager');
+
+      if (!approvalGate.allowed) {
+        const errorMsg = approvalGate.reason || 'Approval is not permitted for this request.';
         addNotification('error', errorMsg);
         return { success: false, error: errorMsg };
       }
@@ -1094,13 +791,15 @@ export function useErpStore() {
   // 14. Reject Purchase Requisition (UC-PRC-002)
   const rejectPurchaseRequisition = useCallback(
     (prId: string, reason: string): { success: boolean; error?: string } => {
-      if (!reason || reason.trim().length === 0) {
-        addNotification('error', 'Rejection rejected: BR-PRC-002 mandates an explicit explanation reason for rejecting a PR.');
-        return { success: false, error: 'Reason mandatory' };
-      }
-
       const pr = state.purchaseRequisitions.find((p) => p.id === prId);
       if (!pr) return { success: false, error: 'PR not found' };
+
+      const rejectionDecision = rejectPurchaseRequisitionDecision(pr, state.currentUser.name, state.currentUser.role, reason, 'Manager');
+      if (!rejectionDecision.allowed) {
+        const errorMsg = rejectionDecision.reason || 'Rejection is not permitted for this request.';
+        addNotification('error', errorMsg);
+        return { success: false, error: errorMsg };
+      }
 
       const now = new Date();
       const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
@@ -1154,6 +853,12 @@ export function useErpStore() {
         qcRequired: boolean;
       }[];
     }) => {
+      const draftEvaluation = evaluatePurchaseOrderDraft(data);
+      if (!draftEvaluation.allowed) {
+        addNotification('error', draftEvaluation.reason || 'Purchase order draft is invalid.');
+        return null;
+      }
+
       const poSeq = (state.purchaseOrders.length + 1).toString().padStart(6, '0');
       const poNumber = `PO-2026-${poSeq}`;
       const now = new Date();
@@ -1181,6 +886,8 @@ export function useErpStore() {
           qcRequired: item.qcRequired,
         };
       });
+
+      totalAmount = draftEvaluation.totalAmount;
 
       const newPO: PurchaseOrder = {
         id: `po-${Date.now()}`,
@@ -1280,108 +987,33 @@ export function useErpStore() {
       const today = now.toISOString().split('T')[0];
       const timeStr = `${today} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 
-      const newMovements: StockMovement[] = [];
-      const newInspections: QualityInspection[] = [];
+      const evaluation = evaluateGoodsReceipt({
+        po,
+        grnNumber,
+        receivedBy: state.currentUser.name,
+        receiptLines,
+        notes,
+        generatedAt: timeStr,
+        inspectionSequence: state.inspections.length + 1,
+      });
+
+      if (!evaluation.allowed) {
+        addNotification('warning', evaluation.reason ?? 'Goods receipt validation rejected the posted receipt.');
+        return { success: false, error: evaluation.reason ?? 'Goods receipt validation failed.' };
+      }
+
+      const { anyQcRequired, isFullyReceived, grn: newGrn, updatedPoItems, newMovements, newInspections, grnItems } = evaluation;
       const updatedProducts = [...state.products];
-      const grnItems: any[] = [];
-      let anyQcRequired = false;
 
-      const updatedPoItems = po.items.map((item) => {
-        const line = receiptLines.find((r) => r.poItemId === item.id);
-        if (!line || line.receivedQty <= 0) return item;
-
-        const newReceivedQty = item.receivedQty + line.receivedQty;
-        const bucket: StockBucket = line.incomingQcRequired ? 'HOLD' : 'AVAILABLE';
-        if (line.incomingQcRequired) anyQcRequired = true;
-
-        const inspectionId = line.incomingQcRequired ? `qc-${Date.now()}-${item.id}` : undefined;
-
-        // 1. Immutable Stock Movement
-        newMovements.push({
-          id: `mov-${Date.now()}-${item.id}`,
-          movementNo: `MATDOC-GRN-${grnSeq}-${item.sku.replace(/\s+/g, '')}`,
-          timestamp: timeStr,
-          productId: item.productId,
-          sku: item.sku,
-          quantity: line.receivedQty,
-          uom: item.uom,
-          fromLocation: 'SUPPLIER-INBOUND-DOCK',
-          toLocation: line.warehouseLoc || (line.incomingQcRequired ? 'PLANT01-RM-WH-HOLD' : 'PLANT01-RM-WH-BAY-01'),
-          lotNumber: line.supplierLot || `LOT-SUP-${Date.now().toString().slice(-4)}`,
-          sourceDocument: grnNumber,
-          movementType: 'GR_PURCHASE',
-          stockBucket: bucket,
-        });
-
-        // 2. Auto-generate Quality Inspection if QC required (UC-PRC-004 & BR-INV-001)
-        if (line.incomingQcRequired) {
-          newInspections.push({
-            id: inspectionId!,
-            inspectionNo: `QC-2026-0${420 + state.inspections.length}`,
-            sourceType: 'RECEIVING',
-            sourceRef: grnNumber,
-            productId: item.productId,
-            sku: item.sku,
-            productName: item.name,
-            lotNumber: line.supplierLot,
-            operationName: 'Incoming Raw Material Inspection (IQC Dock)',
-            sampleSize: Math.min(50, line.receivedQty),
-            defectsCount: 0,
-            characteristic: 'Material Mill Certificate & Dimensional Tolerances',
-            specification: 'ASTM / DIN Industrial Standard Compliance',
-            result: 'PASS',
-            disposition: 'HOLD',
-            inspector: 'QC Receiving Specialist (Pending Release)',
-            timestamp: timeStr,
-            notes: `Material placed on HOLD pending official IQC sign-off. Supplier lot: ${line.supplierLot}.`,
-          });
-        }
-
-        // 3. Update Product On-Hand Stock
-        const prodIndex = updatedProducts.findIndex((p) => p.id === item.productId);
+      for (const line of grnItems) {
+        const prodIndex = updatedProducts.findIndex((product) => product.id === line.productId);
         if (prodIndex >= 0) {
           updatedProducts[prodIndex] = {
             ...updatedProducts[prodIndex],
             currentStock: updatedProducts[prodIndex].currentStock + line.receivedQty,
           };
         }
-
-        grnItems.push({
-          id: `gri-${Date.now()}-${item.id}`,
-          productId: item.productId,
-          sku: item.sku,
-          name: item.name,
-          receivedQty: line.receivedQty,
-          uom: item.uom,
-          supplierLot: line.supplierLot,
-          qcRequired: line.incomingQcRequired,
-          stockBucket: bucket,
-          targetLocation: line.warehouseLoc,
-          inspectionId,
-        });
-
-        return {
-          ...item,
-          receivedQty: newReceivedQty,
-        };
-      });
-
-      const isFullyReceived = updatedPoItems.every((it) => it.receivedQty >= it.orderedQty);
-
-      const newGrn: GoodsReceiptNote = {
-        id: `grn-${Date.now()}`,
-        grnNumber,
-        poId: po.id,
-        poNumber: po.poNumber,
-        supplierName: po.supplierName,
-        receivedDate: timeStr,
-        receivedBy: state.currentUser.name,
-        items: grnItems,
-        notes: notes || 'Supplier delivery accepted at inbound dock.',
-        stockBucketSummary: anyQcRequired
-          ? 'Quarantine: Material routed to HOLD bucket (IQC Inspection required).'
-          : 'Unrestricted: Stock placed directly into AVAILABLE inventory.',
-      };
+      }
 
       const audit: AuditLogEntry = {
         id: `aud-${Date.now()}`,
@@ -1511,56 +1143,30 @@ export function useErpStore() {
   // 18. Issue Material to Production Order (UC-INV-003 & BR-INV-003 Prevention of Hold Stock Issue)
   const issueMaterialToProduction = useCallback(
     (orderId: string, componentSku: string, lotNumber: string, quantity: number, isHoldOverride?: boolean) => {
-      // Find if lot has stock movements in HOLD
-      const isLotOnHold = state.stockMovements.some(
-        (m) => m.lotNumber === lotNumber && m.stockBucket === 'HOLD'
+      const order = state.productionOrders.find((o) => o.id === orderId);
+      if (!order) return { success: false, error: 'Order not found' };
+
+      const decision = issueMaterialToProductionForInventory(
+        order,
+        componentSku,
+        lotNumber,
+        quantity,
+        state.stockMovements,
+        state.currentUser.name,
+        state.currentUser.role,
+        isHoldOverride
       );
 
-      if (isLotOnHold && !isHoldOverride) {
-        const errorMsg = `Action Blocked (UC-INV-003 / BR-INV-003): Material ${componentSku} from Lot ${lotNumber} is currently in HOLD / QUARANTINE status. Material under QC hold is strictly prohibited from being issued to shop floor production. Complete QC release inspection first.`;
+      if (!decision.allowed || !decision.movement || !decision.auditLog) {
+        const errorMsg = decision.reason || 'Material issue blocked.';
         addNotification('error', errorMsg);
         return { success: false, error: errorMsg };
       }
 
-      const order = state.productionOrders.find((o) => o.id === orderId);
-      if (!order) return { success: false, error: 'Order not found' };
-
-      const now = new Date();
-      const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-
-      // Post GI_PRODUCTION stock movement
-      const movement: StockMovement = {
-        id: `mov-${Date.now()}-gi`,
-        movementNo: `MATDOC-GI-${Date.now().toString().slice(-5)}`,
-        timestamp: timeStr,
-        productId: 'raw-001',
-        sku: componentSku,
-        quantity,
-        uom: 'KG',
-        fromLocation: 'PLANT01-RM-WH-AVAILABLE',
-        toLocation: `WIP-${order.operations[0]?.workCenterCode || 'WC-CUT-01'}`,
-        lotNumber,
-        sourceDocument: order.orderNumber,
-        movementType: 'GI_PRODUCTION',
-        stockBucket: 'WIP',
-      };
-
-      const audit: AuditLogEntry = {
-        id: `aud-${Date.now()}`,
-        documentId: order.orderNumber,
-        documentType: 'MATERIAL_ISSUE',
-        action: 'ISSUE_MATERIAL',
-        actor: state.currentUser.name,
-        role: state.currentUser.role,
-        timestamp: timeStr,
-        decision: 'EXECUTED',
-        reason: `Issued ${quantity} of ${componentSku} (Lot: ${lotNumber}) to ${order.orderNumber}.`,
-      };
-
       setState((prev) => ({
         ...prev,
-        stockMovements: [movement, ...prev.stockMovements],
-        auditLogs: [audit, ...prev.auditLogs],
+        stockMovements: [decision.movement!, ...prev.stockMovements],
+        auditLogs: [decision.auditLog!, ...prev.auditLogs],
       }));
 
       addNotification('success', `Issued ${quantity} of ${componentSku} (Lot: ${lotNumber}) to ${order.orderNumber}.`);
@@ -1812,124 +1418,18 @@ export function useErpStore() {
       const project = state.npiProjects.find((p) => p.id === npiProjectId);
       if (!project) return;
 
-      const dwgApproved = state.drawings.some(
-        (d) => d.productId === project.productId && (d.status === 'APPROVED' || d.status === 'RELEASED')
-      );
-      const specApproved = state.specifications.some(
-        (s) => s.productId === project.productId && (s.status === 'APPROVED' || s.status === 'RELEASED')
-      );
-      const bomApproved = state.boms.some((b) => b.productId === project.productId && b.status === 'ACTIVE');
-      const routingApproved = state.routings.some((r) => r.productId === project.productId && r.status === 'ACTIVE');
-      const toolingQualified = state.toolingItems.some(
-        (t) => t.productId === project.productId && (t.status === 'READY' || t.status === 'IN_USE')
-      );
-      const wiReleased = state.workInstructions.some(
-        (w) => w.productId === project.productId && (w.status === 'APPROVED' || w.status === 'RELEASED')
-      );
-      const qcPlanReleased = state.qcPlans.some(
-        (q) => q.productId === project.productId && (q.status === 'APPROVED' || q.status === 'RELEASED')
-      );
-      const materialReady = state.materialRequests.some(
-        (m) => (m.sourceReferenceId === project.projectNumber || m.sourceReferenceId === project.id) && m.status === 'DELIVERED'
-      );
-
-      const items = [
-        {
-          id: 'p-eng-1',
-          pillar: 'ENGINEERING' as const,
-          checkItem: `CAD Drawing Approved & Released (${project.productSku})`,
-          status: dwgApproved ? ('READY' as const) : ('BLOCKED' as const),
-          blockingReason: dwgApproved ? undefined : 'No approved CAD drawing found for this product revision.',
-          responsibleRole: 'Lead Mechanical Eng',
-          verifiedBy: dwgApproved ? 'Bambang Sutrisno' : undefined,
-          verifiedAt: dwgApproved ? new Date().toISOString().split('T')[0] : undefined,
-        },
-        {
-          id: 'p-eng-2',
-          pillar: 'ENGINEERING' as const,
-          checkItem: `Engineering Specification Released`,
-          status: specApproved ? ('READY' as const) : ('BLOCKED' as const),
-          blockingReason: specApproved ? undefined : 'Specification document has not been formally approved.',
-          responsibleRole: 'Systems Architect',
-          verifiedBy: specApproved ? 'Hendra Gunawan' : undefined,
-          verifiedAt: specApproved ? new Date().toISOString().split('T')[0] : undefined,
-        },
-        {
-          id: 'p-eng-3',
-          pillar: 'ENGINEERING' as const,
-          checkItem: `BOM Hierarchy Validated & Released`,
-          status: bomApproved ? ('READY' as const) : ('BLOCKED' as const),
-          blockingReason: bomApproved ? undefined : 'Active BOM is missing or not submitted.',
-          responsibleRole: 'BOM Engineer',
-          verifiedBy: bomApproved ? 'Dewi Lestari' : undefined,
-          verifiedAt: bomApproved ? new Date().toISOString().split('T')[0] : undefined,
-        },
-        {
-          id: 'p-tool-1',
-          pillar: 'TOOLING' as const,
-          checkItem: `Production Tooling Qualified (Molds, Jigs, Dies)`,
-          status: toolingQualified ? ('READY' as const) : ('BLOCKED' as const),
-          blockingReason: toolingQualified ? undefined : 'Required tooling is still in DESIGN or FABRICATION.',
-          responsibleRole: 'Tooling Specialist',
-          verifiedBy: toolingQualified ? 'Hendra Gunawan' : undefined,
-          verifiedAt: toolingQualified ? new Date().toISOString().split('T')[0] : undefined,
-        },
-        {
-          id: 'p-proc-1',
-          pillar: 'PROCESS' as const,
-          checkItem: `Manufacturing Routing & Work Instructions Released`,
-          status: routingApproved && wiReleased ? ('READY' as const) : ('BLOCKED' as const),
-          blockingReason: !routingApproved ? 'Routing is not active.' : !wiReleased ? 'Work Instructions not approved.' : undefined,
-          responsibleRole: 'Methods Engineer',
-          verifiedBy: routingApproved && wiReleased ? 'Dewi Lestari' : undefined,
-          verifiedAt: routingApproved && wiReleased ? new Date().toISOString().split('T')[0] : undefined,
-        },
-        {
-          id: 'p-mat-1',
-          pillar: 'MATERIAL' as const,
-          checkItem: `Trial Raw Materials Staged at Production Line (MR)`,
-          status: materialReady ? ('READY' as const) : ('NOT_READY' as const),
-          blockingReason: materialReady ? undefined : 'Material Request pending warehouse delivery to line staging.',
-          responsibleRole: 'Warehouse Manager',
-          verifiedBy: materialReady ? 'Joko Susilo' : undefined,
-          verifiedAt: materialReady ? new Date().toISOString().split('T')[0] : undefined,
-        },
-        {
-          id: 'p-qc-1',
-          pillar: 'QUALITY' as const,
-          checkItem: `Quality Control Plan & Inspection Characteristics Released`,
-          status: qcPlanReleased ? ('READY' as const) : ('BLOCKED' as const),
-          blockingReason: qcPlanReleased ? undefined : 'QC Plan (QCP) not yet released.',
-          responsibleRole: 'Quality Director',
-          verifiedBy: qcPlanReleased ? 'Siti Nurhaliza' : undefined,
-          verifiedAt: qcPlanReleased ? new Date().toISOString().split('T')[0] : undefined,
-        },
-        {
-          id: 'p-ppl-1',
-          pillar: 'PEOPLE_PRODUCTION' as const,
-          checkItem: `Shop Floor Operators Certified & Shift Scheduled`,
-          status: 'READY' as const,
-          responsibleRole: 'Production Supervisor',
-          verifiedBy: 'Agus Pratama',
-          verifiedAt: new Date().toISOString().split('T')[0],
-        },
-      ];
-
-      const blockingIssues = items.filter((i) => i.status === 'BLOCKED').map((i) => `${i.checkItem}: ${i.blockingReason}`);
-      const overallStatus = blockingIssues.length > 0 ? ('BLOCKED' as const) : items.some((i) => i.status === 'NOT_READY') ? ('NOT_READY' as const) : ('READY' as const);
-
-      const report: ProductionReadinessReport = {
-        id: `read-${Date.now()}`,
-        npiProjectId,
-        productSku: project.productSku,
-        productRevision: project.productRevision,
-        targetRunType: project.status === 'TRIAL' ? 'TRIAL' : 'PILOT',
-        overallStatus,
-        items,
-        blockingIssues,
-        evaluatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+      const report = evaluateProductionReadiness({
+        project,
+        drawings: state.drawings,
+        specifications: state.specifications,
+        boms: state.boms,
+        routings: state.routings,
+        toolingItems: state.toolingItems,
+        workInstructions: state.workInstructions,
+        qcPlans: state.qcPlans,
+        materialRequests: state.materialRequests,
         evaluator: state.currentUser.name,
-      };
+      });
 
       setState((prev) => ({
         ...prev,
@@ -1938,13 +1438,13 @@ export function useErpStore() {
           [npiProjectId]: report,
         },
         npiProjects: prev.npiProjects.map((p) =>
-          p.id === npiProjectId ? { ...p, blockingIssues } : p
+          p.id === npiProjectId ? { ...p, blockingIssues: report.blockingIssues } : p
         ),
       }));
 
       addNotification(
-        overallStatus === 'READY' ? 'success' : 'warning',
-        `Production Readiness Evaluated: Overall status is ${overallStatus}. ${blockingIssues.length} blockers detected.`
+        report.overallStatus === 'READY' ? 'success' : 'warning',
+        `Production Readiness Evaluated: Overall status is ${report.overallStatus}. ${report.blockingIssues.length} blockers detected.`
       );
     },
     [state.npiProjects, state.drawings, state.specifications, state.boms, state.routings, state.toolingItems, state.workInstructions, state.qcPlans, state.materialRequests, state.currentUser.name, addNotification]
@@ -2066,10 +1566,7 @@ export function useErpStore() {
   // 29. MATERIAL REQUEST & PHYSICAL LINE DELIVERY LEDGER
   const createMaterialRequest = useCallback(
     (mrData: Partial<MaterialRequest>) => {
-      const mrNum = `MR-2026-${(state.materialRequests.length + 1).toString().padStart(6, '0')}`;
-      const newMR: MaterialRequest = {
-        id: `mr-${Date.now()}`,
-        requestNumber: mrNum,
+      const newMR = createMaterialRequestInDomain({
         sourceType: mrData.sourceType || 'PRODUCTION_ORDER',
         sourceReferenceId: mrData.sourceReferenceId || 'MO-2026-00124',
         productId: mrData.productId,
@@ -2079,10 +1576,9 @@ export function useErpStore() {
         requiredDate: mrData.requiredDate || new Date().toISOString().split('T')[0],
         destinationLine: mrData.destinationLine || 'Line 1 - Staging Bay',
         priority: mrData.priority || 'HIGH',
-        status: 'SUBMITTED',
         items: mrData.items || [],
         notes: mrData.notes,
-      };
+      });
 
       setState((prev) => ({
         ...prev,
@@ -2091,33 +1587,23 @@ export function useErpStore() {
       addNotification('success', `Created Material Request: ${newMR.requestNumber}`);
       return newMR;
     },
-    [state.materialRequests.length, state.currentUser.name, addNotification]
+    [state.currentUser.name, addNotification]
   );
 
   const pickMaterialRequest = useCallback(
     (id: string, pickedBy: string) => {
+      const request = state.materialRequests.find((m) => m.id === id);
+      if (!request) return;
+
+      const updatedRequest = pickMaterialRequestInDomain(request, pickedBy);
+
       setState((prev) => ({
         ...prev,
-        materialRequests: prev.materialRequests.map((mr) => {
-          if (mr.id === id) {
-            return {
-              ...mr,
-              status: 'READY' as const,
-              pickedBy,
-              pickedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
-              items: mr.items.map((it) => ({
-                ...it,
-                pickedQuantity: it.requestedQuantity,
-                status: 'PICKED' as const,
-              })),
-            };
-          }
-          return mr;
-        }),
+        materialRequests: prev.materialRequests.map((mr) => (mr.id === id ? updatedRequest : mr)),
       }));
       addNotification('info', `Material Request picked from warehouse bins and staged for line dispatch.`);
     },
-    [addNotification]
+    [state.materialRequests, addNotification]
   );
 
   const deliverMaterialRequestToLine = useCallback(
@@ -2125,64 +1611,26 @@ export function useErpStore() {
       const mr = state.materialRequests.find((m) => m.id === id);
       if (!mr) return;
 
-      const timeStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      const evaluation = evaluateMaterialRequestDelivery({
+        request: mr,
+        deliveredBy,
+        receivedBy: state.currentUser.name,
+        lineLocation,
+      });
 
-      // Post physical StockMovement into WIP / Line Staging
-      const movements: StockMovement[] = mr.items.map((item, idx) => ({
-        id: `mov-${Date.now()}-${idx}-line`,
-        movementNo: `MATDOC-LINE-${Date.now().toString().slice(-5)}-${idx}`,
-        timestamp: timeStr,
-        productId: item.productId,
-        sku: item.sku,
-        quantity: item.requestedQuantity,
-        uom: item.uom,
-        fromLocation: item.fromWarehouse || 'MAIN-WH-STAGING',
-        toLocation: lineLocation || mr.destinationLine,
-        lotNumber: `LOT-LINE-${Date.now().toString().slice(-4)}`,
-        sourceDocument: mr.requestNumber,
-        movementType: 'GI_PRODUCTION',
-        stockBucket: 'WIP',
-      }));
-
-      const audit: AuditLogEntry = {
-        id: `aud-${Date.now()}`,
-        documentId: mr.requestNumber,
-        documentType: 'MATERIAL_REQUEST',
-        action: 'LINE_DELIVERY',
-        actor: deliveredBy,
-        role: 'Material Logistics Handler',
-        timestamp: timeStr,
-        oldStatus: mr.status,
-        newStatus: 'DELIVERED',
-        decision: 'EXECUTED',
-        reason: `Delivered ${mr.items.length} line items to ${lineLocation || mr.destinationLine}. Inventory posted to WIP ledger.`,
-      };
+      if (!evaluation.allowed) {
+        addNotification('error', evaluation.reason || 'Material request delivery rejected.');
+        return;
+      }
 
       setState((prev) => ({
         ...prev,
-        stockMovements: [...movements, ...prev.stockMovements],
-        materialRequests: prev.materialRequests.map((m) => {
-          if (m.id === id) {
-            return {
-              ...m,
-              status: 'DELIVERED' as const,
-              deliveredBy,
-              deliveredAt: timeStr,
-              receivedBy: state.currentUser.name,
-              receivedAt: timeStr,
-              items: m.items.map((it) => ({
-                ...it,
-                deliveredQuantity: it.requestedQuantity,
-                status: 'DELIVERED' as const,
-              })),
-            };
-          }
-          return m;
-        }),
-        auditLogs: [audit, ...prev.auditLogs],
+        stockMovements: [...evaluation.stockMovements, ...prev.stockMovements],
+        materialRequests: prev.materialRequests.map((m) => (m.id === id ? evaluation.request : m)),
+        auditLogs: [evaluation.auditLog!, ...prev.auditLogs],
       }));
 
-      addNotification('success', `Material Request ${mr.requestNumber} delivered to line. Ledger updated.`);
+      addNotification('success', evaluation.reason || `Material Request ${mr.requestNumber} delivered to line. Ledger updated.`);
     },
     [state.materialRequests, state.currentUser.name, addNotification]
   );
@@ -2622,55 +2070,27 @@ export function useErpStore() {
   // ============================================================================
   const createProductionPlan = useCallback(
     (planData: Partial<ProductionPlanItem>) => {
-      const planSeq = (state.productionPlans.length + 1).toString().padStart(2, '0');
-      const planNumber = planData.planNumber || `PLAN-2026-W43-${planSeq}`;
-      const product = state.products.find((p) => p.id === planData.productId || p.sku === planData.productSku) || state.products[0];
-      const demandQty = planData.demandQty || 5000;
-      const plannedQty = planData.plannedQty !== undefined ? planData.plannedQty : demandQty;
-      const unfulfilledQty = Math.max(0, demandQty - plannedQty);
-
-      // Check BOM explosion
-      const bomNode = explodeMultiLevelBom(product.id, demandQty, state.products, state.boms);
-      const flat = bomNode ? [bomNode, ...(bomNode.children || [])] : [];
-      const shortages = flat.filter((n) => n.shortageQty > 0);
-
-      // Check routing & machine load
-      const routing = state.routings.find((r) => r.productId === product.id || r.productSku === product.sku) || state.routings[0];
-      const op10 = routing?.operations[0];
-      const cycleTime = op10 ? op10.runTimeSecondsPerUnit : 30;
-      const { pcsPerHour } = calculateOutputRate(cycleTime);
-      const m01 = state.machines.find((m) => m.code === 'M01') || state.machines[0];
-      const machineUnits = m01 ? m01.availableUnits : 3;
-      const dailyCap = Math.round(machineUnits * 8 * pcsPerHour * (m01 ? m01.efficiencyRate : 0.85));
-      const machineDeficitHours = Math.max(0, (demandQty - dailyCap) / (pcsPerHour * 0.85));
-
-      const feasibility = evaluateProductionFeasibility(
-        shortages.length,
-        machineDeficitHours,
-        2 // e.g. 2 operators deficit when 6 needed vs 4 available
-      );
-
-      const newPlan: ProductionPlanItem = {
-        id: `plan-${Date.now()}`,
-        planNumber,
-        periodWeek: planData.periodWeek || 'Week 43 - Oct 2026',
-        demandRef: planData.demandRef || 'DEM-2026-5001',
-        productId: product.id,
-        productSku: product.sku,
-        productName: product.name,
-        demandQty,
-        plannedQty,
-        unfulfilledQty,
-        feasibility: feasibility.overallState,
-        constraintNotes: feasibility.summaryMessage,
-        targetStartDate: planData.targetStartDate || '2026-10-26',
-        targetEndDate: planData.targetEndDate || '2026-10-30',
-        status: planData.status || 'FEASIBILITY_REVIEW',
-      };
+      const newPlan = buildProductionPlanFromDemand({
+        planNumber: planData.planNumber,
+        productId: planData.productId,
+        productSku: planData.productSku,
+        demandQty: planData.demandQty,
+        plannedQty: planData.plannedQty,
+        allProducts: state.products,
+        allBoms: state.boms,
+        allRoutings: state.routings,
+        allMachines: state.machines,
+        allEmployees: state.manpower,
+        periodWeek: planData.periodWeek,
+        demandRef: planData.demandRef,
+        targetStartDate: planData.targetStartDate,
+        targetEndDate: planData.targetEndDate,
+        status: planData.status,
+      });
 
       const audit: AuditLogEntry = {
         id: `aud-${Date.now()}`,
-        documentId: planNumber,
+        documentId: newPlan.planNumber,
         documentType: 'PRODUCTION_PLAN',
         action: 'CREATE_PLAN',
         actor: state.currentUser.name,
@@ -2678,7 +2098,7 @@ export function useErpStore() {
         timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
         newStatus: newPlan.status,
         decision: 'EXECUTED',
-        reason: `Generated Master Production Plan ${planNumber}. Feasibility: ${newPlan.feasibility} (${feasibility.summaryMessage})`,
+        reason: `Generated Master Production Plan ${newPlan.planNumber}. Feasibility: ${newPlan.feasibility} (${newPlan.constraintNotes ?? 'No specific constraints logged'})`,
       };
 
       setState((prev) => ({
@@ -2689,11 +2109,11 @@ export function useErpStore() {
 
       addNotification(
         newPlan.feasibility === 'FEASIBLE' ? 'success' : 'warning',
-        `Created Production Plan ${planNumber} (${newPlan.feasibility}).`
+        `Created Production Plan ${newPlan.planNumber} (${newPlan.feasibility}).`
       );
       return newPlan;
     },
-    [state.productionPlans.length, state.products, state.boms, state.routings, state.machines, state.currentUser, addNotification]
+    [state.productionPlans.length, state.products, state.boms, state.routings, state.machines, state.manpower, state.currentUser, addNotification]
   );
 
   const updateProductionPlan = useCallback(
@@ -2714,22 +2134,22 @@ export function useErpStore() {
       const plan = state.productionPlans.find((p) => p.id === planId);
       if (!plan) return { success: false, error: 'Plan not found.' };
 
-      // Rule 1: Production cannot be scheduled without active routing!
       const routing = state.routings.find(
         (r) => (r.productId === plan.productId || r.productSku === plan.productSku) && r.status === 'ACTIVE'
-      );
-      if (!routing) {
-        const err = `Rule 1 Violation: Cannot generate Work Order for ${plan.productSku} without an ACTIVE routing.`;
-        addNotification('error', err);
-        return { success: false, error: err };
-      }
+      ) || state.routings.find((r) => r.productId === plan.productId || r.productSku === plan.productSku);
 
-      const mo = createProductionOrder({
-        productId: plan.productId,
-        quantity: plan.plannedQty,
-        dueDate: plan.targetEndDate,
+      const result = dispatchProductionPlan({
+        plan,
+        routing,
+        createProductionOrder: (input) => createProductionOrder(input),
       });
 
+      if (!result.success) {
+        addNotification('error', result.error || 'Work order dispatch failed.');
+        return result;
+      }
+
+      const mo = state.productionOrders.find((order) => order.id === result.orderId);
       if (mo) {
         setState((prev) => ({
           ...prev,
@@ -2738,11 +2158,11 @@ export function useErpStore() {
           ),
         }));
         addNotification('success', `Dispatched Work Order ${mo.orderNumber} from Plan ${plan.planNumber}. BOM & Routing revisions snapshot frozen per Rule 10.`);
-        return { success: true, orderId: mo.id };
       }
-      return { success: false, error: 'Failed to create production order.' };
+
+      return result;
     },
-    [state.productionPlans, state.routings, createProductionOrder, addNotification]
+    [state.productionPlans, state.routings, state.productionOrders, createProductionOrder, addNotification]
   );
 
   const runFiniteScheduling = useCallback(
@@ -2751,19 +2171,17 @@ export function useErpStore() {
       const product = state.products.find((p) => p.id === targetDemand.productId || p.sku === targetDemand.productSku) || state.products[0];
       const routing = state.routings.find((r) => r.productId === product.id || r.productSku === product.sku) || state.routings[0];
 
-      const slots = generateFiniteScheduleSlots(
-        targetDemand,
+      const slots = buildFiniteScheduleFromDemand({
+        demand: targetDemand,
         product,
         routing,
-        state.machines,
-        state.manpower,
-        state.changeoverMatrix,
-        {
-          startDate: options?.startDate || '2026-10-26',
-          shiftStartTime: options?.shiftStartTime || '07:00',
-          shiftHours: options?.shiftHours || 8,
-        }
-      );
+        machines: state.machines,
+        employees: state.manpower,
+        changeoverRules: state.changeoverMatrix,
+        startDate: options?.startDate || '2026-10-26',
+        shiftStartTime: options?.shiftStartTime || '07:00',
+        shiftHours: options?.shiftHours || 8,
+      });
 
       setState((prev) => ({
         ...prev,
@@ -2784,18 +2202,20 @@ export function useErpStore() {
   const simulateWhatIfScenario = useCallback(
     (customOverrides?: any) => {
       const routing = state.routings.find((r) => r.productSku === 'FG-001') || state.routings[0];
-      const scenarios = runWhatIfSimulation(
-        'FG-001',
-        5000,
-        '2026-10-30',
-        state.machines,
+      const scenarioDefinitions = [
+        { name: 'Scenario A: Baseline (2 Machines, 8h Shift)', description: 'Baseline single-shift capacity allocation', machineQuantityOverride: 2, shiftHours: 8, extraShift: false },
+        { name: 'Scenario B: +1 Machine (3 Machines M01, 8h Shift)', description: 'Activate 3rd machine to increase throughput', machineQuantityOverride: 3, shiftHours: 8, extraShift: false },
+        { name: 'Scenario C: 2 Machines + Overtime (10h Shift)', description: 'Authorize 2h daily overtime on 2 machines', machineQuantityOverride: 2, shiftHours: 10, extraShift: false },
+      ];
+
+      const scenarios = buildWhatIfScenarios({
+        targetProductSku: 'FG-001',
+        demandQty: 5000,
+        dueDate: '2026-10-30',
+        baselineMachines: state.machines,
         routing,
-        [
-          { name: 'Scenario A: Baseline (2 Machines, 8h Shift)', description: 'Baseline single-shift capacity allocation', machineQuantityOverride: 2, shiftHours: 8, extraShift: false },
-          { name: 'Scenario B: +1 Machine (3 Machines M01, 8h Shift)', description: 'Activate 3rd machine to increase throughput', machineQuantityOverride: 3, shiftHours: 8, extraShift: false },
-          { name: 'Scenario C: 2 Machines + Overtime (10h Shift)', description: 'Authorize 2h daily overtime on 2 machines', machineQuantityOverride: 2, shiftHours: 10, extraShift: false },
-        ]
-      );
+        scenariosToRun: customOverrides ? customOverrides : scenarioDefinitions,
+      });
 
       setState((prev) => ({
         ...prev,
@@ -2924,9 +2344,10 @@ export function useErpStore() {
 
   // Reset to initial baseline
   const resetDemoState = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(LEGACY_ERP_STORAGE_KEY);
+    localStorage.removeItem(UI_PREFERENCES_STORAGE_KEY);
     setState(getInitialState());
-    addNotification('info', 'Reset database to pristine PDF specification baseline.');
+    addNotification('info', 'Reset demo ERP state to pristine baseline.');
   }, [addNotification]);
 
   return {

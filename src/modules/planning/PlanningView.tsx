@@ -51,12 +51,14 @@ import {
   calculateManpowerRequirement,
   explodeMultiLevelBom,
   flattenBomNodes,
-  calculateChangeoverTime,
   analyzeBottlenecks,
   evaluateProductionFeasibility,
+} from './planningService';
+import {
+  calculateChangeoverTime,
   generateFiniteScheduleSlots,
   runWhatIfSimulation,
-} from '../../lib/services/ppicService';
+} from '../scheduling/schedulingService';
 import {
   EnterpriseDataGrid,
   GridColumn,

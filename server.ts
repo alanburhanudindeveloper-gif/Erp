@@ -3,6 +3,17 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
+import { requireErpAuth } from './src/modules/security/authorizationService.ts';
+import {
+  getCapacityOverview,
+  getErpDashboardSummary,
+  getInventoryOverview,
+  getPlanningOverview,
+  getProductionOrderOverview,
+  getSchedulingOverview,
+  getTestingOverview,
+  getWorkflowOverview,
+} from './src/infrastructure/erp/erpServerService.ts';
 
 dotenv.config();
 
@@ -13,6 +24,47 @@ const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: '10mb' }));
+
+app.get('/api/erp/health', (_req, res) => {
+  res.json({
+    ok: true,
+    mode: 'server-side-erp-boundary',
+    repository: 'in-memory-repository-backed',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get('/api/erp/dashboard', requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Quality Lead'] }), (_req, res) => {
+  res.json(getErpDashboardSummary());
+});
+
+app.get('/api/erp/inventory', requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Quality Lead'] }), (_req, res) => {
+  res.json({ items: getInventoryOverview() });
+});
+
+app.get('/api/erp/production-orders', requireErpAuth({ requiredRoles: ['Planner', 'Supervisor'] }), (_req, res) => {
+  res.json({ orders: getProductionOrderOverview() });
+});
+
+app.get('/api/erp/capacity', requireErpAuth({ requiredRoles: ['Planner', 'Supervisor'] }), (_req, res) => {
+  res.json({ workCenters: getCapacityOverview() });
+});
+
+app.get('/api/erp/planning', requireErpAuth({ requiredRoles: ['Planner', 'Supervisor'] }), (_req, res) => {
+  res.json({ planning: getPlanningOverview() });
+});
+
+app.get('/api/erp/scheduling', requireErpAuth({ requiredRoles: ['Planner', 'Supervisor'] }), (_req, res) => {
+  res.json({ scheduling: getSchedulingOverview() });
+});
+
+app.get('/api/erp/workflows', requireErpAuth({ requiredRoles: ['Supervisor', 'Quality Lead'] }), (_req, res) => {
+  res.json({ workflows: getWorkflowOverview() });
+});
+
+app.get('/api/erp/testing', requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Quality Lead'] }), (_req, res) => {
+  res.json({ testing: getTestingOverview() });
+});
 
 // In-memory AI Budget, Caching, and Telemetry store (Section 6.5 & Section 7)
 interface AiUsageStats {
