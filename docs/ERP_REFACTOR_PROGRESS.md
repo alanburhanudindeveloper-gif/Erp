@@ -67,11 +67,55 @@ The repository is being refactored incrementally toward a modular monolith with 
 - The legacy manufacturing store delegates downtime posting and restoration to the domain module without keeping the domain decision logic inline.
 - Regression coverage is in [src/modules/manufacturing/machineDowntimeService.test.ts](../src/modules/manufacturing/machineDowntimeService.test.ts).
 
+### Enterprise Governance & 3-Pillar Navigation Taxonomy
+- App navigation restructured into 3 top-level architecture pillars: `OPERATIONS`, `WORKFLOW`, and `SETTINGS`.
+- Decoupled physical `EmployeeMaster` (NIK, department, plant, skill matrix, operator hourly rates) from digital `UserAccount` (login credentials, roles, permission tokens `domain.entity.action`).
+- Implemented organization hierarchy master models: `Company`, `PlantMaster` (Plant 1 Batam, Plant 2 Cikarang), `DepartmentMaster`, `SectionMaster`, and `PositionMaster`.
+- Seeded initial master records in [src/lib/mockData.ts](../src/lib/mockData.ts).
+
+### Generic Dynamic Approval Matrix Engine
+- Built condition-based matrix evaluator (`evaluateApprovalMatrix`) in [src/modules/workflow/workflowMatrixService.ts](../src/modules/workflow/workflowMatrixService.ts).
+- Supports dynamic multi-tier authorization chains based on `approvalType`, `plantId`, `totalQuantity`, and `totalAmount` (e.g. Batam Production Plan $>5,000$ pcs requiring PPIC Manager $\rightarrow$ Production Manager $\rightarrow$ Plant Director).
+- Enforces Segregation of Duties (anti-self-approval) and mandatory reason codes on rejection.
+- Automated regression suite added in [src/modules/workflow/workflowMatrixService.test.ts](../src/modules/workflow/workflowMatrixService.test.ts) (6 new unit tests).
+
+### High-Density TanStack Table Integration
+- Integrated `@tanstack/react-table` in [src/components/common/DataTable.tsx](../src/components/common/DataTable.tsx) for enterprise dense data grids ($36\text{px}$–$40\text{px}$ row height).
+- Implemented column sorting, live global search filtering, tabular-num typography, pagination, and zero-pill compliant unboxed tags.
+- Applied to Master Data, Physical Employees, User Accounts, and Approval Inboxes.
+
+### Standalone Workflow Center & Settings Hub
+- Created [src/modules/workflow/WorkflowView.tsx](../src/modules/workflow/WorkflowView.tsx) with *My Tasks / Approval Inbox*, *Approval Requests*, *All Pending*, *History*, and *Decision Drawer* with 5-pillar constraint radar snapshot.
+- Created [src/modules/settings/SettingsView.tsx](../src/modules/settings/SettingsView.tsx) with dedicated views for Organization, People (Employee vs User), Security RBAC, and Approval Matrix rules.
+- Added top header indicator `🔔 [N] Pending Approvals` routing directly to the user's approval inbox.
+
+### Manufacturing Execution & Quality Domain Services
+- Extracted recursive multi-level BOM explosion and net requirements engine in [src/modules/manufacturing/bomExplosionService.ts](../src/modules/manufacturing/bomExplosionService.ts) with scrap allowances, cycle detection, and lead-time critical path calculation.
+- Extracted shop floor operator check-in and execution telemetry in [src/modules/manufacturing/shopFloorService.ts](../src/modules/manufacturing/shopFloorService.ts), verifying physical `EmployeeMaster` NIK, plant compatibility, run pace, and scrap alarm thresholds.
+- Extracted quality inspection gates (IQC, IPQC, FQC) and Non-Conformance Report (NCR) resolution in [src/modules/quality/qualityService.ts](../src/modules/quality/qualityService.ts), posting automatic inventory transfers into `HOLD` (Quarantine) and `REJECTED` buckets.
+- Extended server routes in [server.ts](../server.ts) and [src/infrastructure/erp/erpServerService.ts](../src/infrastructure/erp/erpServerService.ts) for `/api/erp/quality` and `/api/erp/bom-explosion` protected by role authorization.
+- Enhanced shop floor kiosk terminal in [src/modules/manufacturing/ShopFloorTerminal.tsx](../src/modules/manufacturing/ShopFloorTerminal.tsx) with verified NIK operator badge selection and real-time skill clearance.
+
+### Inventory 5-Bucket Ledger & Work Order Lifecycle
+- Extracted atomic 5-bucket balance computation (`AVAILABLE`, `RESERVED`, `WIP`, `HOLD`, `REJECTED`) and negative inventory prevention in [src/modules/inventory/inventoryLedgerService.ts](../src/modules/inventory/inventoryLedgerService.ts).
+- Enforced immutable ledger audit trails and compensating movement reversals (`REVERSAL`).
+- Extracted Work Order state transitions (`DRAFT` $\rightarrow$ `PLANNED` $\rightarrow$ `CANCELLED`) in [src/modules/manufacturing/workOrderService.ts](../src/modules/manufacturing/workOrderService.ts) ensuring mandatory approved BOM and routing bindings.
+
+### Domain Repository Layer & Persistence Boundaries
+- Formalized [IWorkOrderRepository](../src/modules/manufacturing/workOrderRepository.ts), [IInventoryRepository](../src/modules/inventory/inventoryRepository.ts), and [IQualityRepository](../src/modules/quality/qualityRepository.ts) backed by authoritative ERP collection repositories.
+- Replaced direct array and browser storage mutations with interface contracts ready for PostgreSQL and Drizzle ORM migration.
+- Added comprehensive unit tests for each repository: [workOrderRepository.test.ts](../src/modules/manufacturing/workOrderRepository.test.ts), [inventoryRepository.test.ts](../src/modules/inventory/inventoryRepository.test.ts), and [qualityRepository.test.ts](../src/modules/quality/qualityRepository.test.ts).
+
+### Foundation Architecture Specifications
+- Established [docs/architecture/ARCHITECTURE_AUDIT.md](architecture/ARCHITECTURE_AUDIT.md) documenting God Objects, dependency directions, and risk categorizations.
+- Formalized [docs/architecture/ERP_ARCHITECTURE.md](architecture/ERP_ARCHITECTURE.md) defining strict module boundaries, inward dependency rules, and server-authoritative security boundaries.
+- Published [docs/architecture/ARCHITECTURE_AUDIT_FINAL.md](architecture/ARCHITECTURE_AUDIT_FINAL.md) tracking before/after architectural transformation.
+
 ### Verification
 - Targeted domain tests pass.
-- Full repository test suite passes.
-- Type-check and production build pass.
-- Server start verified under the project runtime on localhost:3001 after resolving the ESM import issue.
+- Full repository test suite passes (**76/76 tests passed**).
+- TypeScript compile and linter pass with 0 errors (`npm run lint`).
+- Production build succeeded (`npm run build`).
 
 ---
 
@@ -81,7 +125,7 @@ The repository is being refactored incrementally toward a modular monolith with 
 - Formalize more backend application/service boundaries beyond procurement and workflow.
 - Expand repository abstraction for additional ERP collections as they become active transactional domains.
 - Move more domain logic from UI/state-heavy service orchestration into dedicated modules.
-- Increase coverage for high-risk ERP areas such as BOM explosion, inventory ledger, scheduling, capacity, and governance transitions.
+- Increase coverage for high-risk ERP areas such as scheduling, capacity, and governance transitions.
 
 ---
 
@@ -91,7 +135,7 @@ The repository is being refactored incrementally toward a modular monolith with 
 2. Continue backend/infrastructure decomposition around persistence, repository abstractions, and application-service boundaries.
 3. Maintain strict separation between ERP source-of-truth data and browser UI state; avoid placing authoritative ERP state in client-only storage.
 4. Keep authorization, approval, and governance checks enforced on the server side, with UI checks treated only as UX hints.
-5. Expand regression coverage for high-risk ERP domains such as BOM explosion, capacity, scheduling, inventory ledger, and workflow transitions.
+5. Expand regression coverage for high-risk ERP domains such as capacity, scheduling, and workflow transitions.
 6. Keep the repository green by validating the relevant test, lint, and build checks after each boundary extraction.
 
 ---
@@ -99,7 +143,7 @@ The repository is being refactored incrementally toward a modular monolith with 
 ## Verification command used
 
 ```bash
-cd /d c:\app\erpApp\Erp && npx.cmd tsx --test "src/**/*.test.ts" && npm.cmd run lint && npm.cmd run build
+npx tsx --test "src/**/*.test.ts" && npm run lint && npm run build
 ```
 
-Result: 52 tests passed, 0 failed; lint passed; build succeeded.
+Result: 76 tests passed, 0 failed; lint passed; build succeeded.

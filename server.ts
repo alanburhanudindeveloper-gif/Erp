@@ -10,6 +10,8 @@ import {
   getInventoryOverview,
   getPlanningOverview,
   getProductionOrderOverview,
+  getQualityOverview,
+  getBomExplosionOverview,
   getSchedulingOverview,
   getTestingOverview,
   getWorkflowOverview,
@@ -64,6 +66,16 @@ app.get('/api/erp/workflows', requireErpAuth({ requiredRoles: ['Supervisor', 'Qu
 
 app.get('/api/erp/testing', requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Quality Lead'] }), (_req, res) => {
   res.json({ testing: getTestingOverview() });
+});
+
+app.get('/api/erp/quality', requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor'] }), (_req, res) => {
+  res.json({ quality: getQualityOverview() });
+});
+
+app.get('/api/erp/bom-explosion', requireErpAuth({ requiredRoles: ['Planner', 'Supervisor'] }), (req, res) => {
+  const productId = req.query.productId as string | undefined;
+  const quantity = req.query.quantity ? parseInt(req.query.quantity as string, 10) : 100;
+  res.json({ explosion: getBomExplosionOverview(productId, isNaN(quantity) ? 100 : quantity) });
 });
 
 // In-memory AI Budget, Caching, and Telemetry store (Section 6.5 & Section 7)

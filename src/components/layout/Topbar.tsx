@@ -22,6 +22,8 @@ interface TopbarProps {
   isSidebarCollapsed: boolean;
   onToggleSidebarCollapse: () => void;
   onOpenAiBudget?: () => void;
+  onOpenWorkflow?: () => void;
+  pendingApprovalsCount?: number;
 }
 
 export const Topbar: React.FC<TopbarProps> = ({
@@ -37,6 +39,8 @@ export const Topbar: React.FC<TopbarProps> = ({
   isSidebarCollapsed,
   onToggleSidebarCollapse,
   onOpenAiBudget,
+  onOpenWorkflow,
+  pendingApprovalsCount = 0,
 }) => {
   return (
     <header className="h-14 border-b border-slate-200 bg-white sticky top-0 z-20 px-3 sm:px-6 flex items-center justify-between gap-3 sm:gap-6 shrink-0 w-full">
@@ -128,6 +132,23 @@ export const Topbar: React.FC<TopbarProps> = ({
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             <span className="font-semibold text-blue-900">AI Gateway</span>
             <span className="text-[10px] text-blue-700 font-mono font-bold">$0.003</span>
+          </button>
+        )}
+
+        {/* Approval Inbox Quick Button */}
+        {onOpenWorkflow && (
+          <button
+            onClick={onOpenWorkflow}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded transition-colors"
+            title="Buka Pusat Approval & Workflow Inbox"
+          >
+            <Bell className="w-3.5 h-3.5 text-indigo-600" />
+            <span className="hidden sm:inline">Approval Inbox</span>
+            {pendingApprovalsCount > 0 && (
+              <span className="font-mono text-[10px] bg-indigo-600 text-white px-1.5 py-0.2 rounded-full font-bold">
+                {pendingApprovalsCount}
+              </span>
+            )}
           </button>
         )}
 

@@ -19,6 +19,8 @@ import { ManufacturingWorkflowGuide } from './modules/learn/ManufacturingWorkflo
 import { ProcurementView } from './modules/procurement/ProcurementView';
 import { NpiView } from './modules/npi/NpiView';
 import { EngineeringHubView } from './modules/engineering/EngineeringHubView';
+import { WorkflowView } from './modules/workflow/WorkflowView';
+import { SettingsView } from './modules/settings/SettingsView';
 import { AiBudgetTelemetryModal } from './components/ai/AiBudgetTelemetryModal';
 import { Bell, X } from 'lucide-react';
 
@@ -93,7 +95,9 @@ export default function App() {
     if (subTab) {
       setActiveSubTab(subTab);
     } else {
-      if (nav === 'npi') setActiveSubTab('dashboard');
+      if (nav === 'workflow') setActiveSubTab('my-tasks');
+      else if (nav === 'settings') setActiveSubTab('organization');
+      else if (nav === 'npi') setActiveSubTab('dashboard');
       else if (nav === 'engineering') setActiveSubTab('drawings');
       else if (nav === 'master-data') setActiveSubTab('products');
       else if (nav === 'planning') setActiveSubTab('ppic-dashboard');
@@ -116,6 +120,10 @@ export default function App() {
   const currentModuleTitle =
     activeNav === 'dashboard'
       ? 'Dashboard'
+      : activeNav === 'workflow'
+      ? 'Pusat Tata Kelola & Approval Workflow'
+      : activeNav === 'settings'
+      ? 'Pusat Konfigurasi & Master Tata Kelola'
       : activeNav === 'npi'
       ? 'NPI & Production Readiness'
       : activeNav === 'engineering'
@@ -154,6 +162,7 @@ export default function App() {
         activeSubTab={activeSubTab}
         onSelectNav={handleSelectNav}
         openOrdersCount={openOrdersCount}
+        pendingApprovalsCount={1}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
         isMobileOpen={isMobileSidebarOpen}
@@ -176,6 +185,8 @@ export default function App() {
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebarCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
           onOpenAiBudget={() => setShowAiBudgetModal(true)}
+          onOpenWorkflow={() => handleSelectNav('workflow', 'my-tasks')}
+          pendingApprovalsCount={1}
         />
 
         {/* Content Scroll Viewport */}
@@ -355,6 +366,23 @@ export default function App() {
               currentUser={state.currentUser}
               onSwitchUser={switchCurrentUser}
             />
+          )}
+
+          {activeNav === 'workflow' && (
+            <WorkflowView
+              initialTab={activeSubTab}
+              currentUser={{
+                id: 'emp-103',
+                name: 'Hendra Wijaya',
+                roles: ['PPIC_MANAGER', 'SUPERVISOR'],
+                plantScope: ['PLANT-01', 'PLANT-02'],
+              }}
+              onNavigateToModule={handleSelectNav}
+            />
+          )}
+
+          {activeNav === 'settings' && (
+            <SettingsView initialTab={activeSubTab} />
           )}
 
           {activeNav === 'testing' && (

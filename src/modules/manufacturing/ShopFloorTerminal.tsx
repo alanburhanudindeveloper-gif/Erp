@@ -14,8 +14,10 @@ import {
   ArrowLeft,
   Sparkles,
   Filter,
+  BadgeCheck,
 } from 'lucide-react';
 import { WorkCenter, ProductionOrder, ReasonCode } from '../../types';
+import { INITIAL_EMPLOYEES } from '../../lib/mockData';
 import { StatusBadge } from '../../components/common/StatusBadge';
 import { SwipeableOrderCard } from './SwipeableOrderCard';
 
@@ -49,6 +51,7 @@ export const ShopFloorTerminal: React.FC<ShopFloorTerminalProps> = ({
   onSelectOrder,
 }) => {
   const [selectedWcId, setSelectedWcId] = useState<string>(workCenters[1]?.id || workCenters[0]?.id);
+  const [selectedOperatorNik, setSelectedOperatorNik] = useState<string>('EMP-2026-0102');
   const [operatorName, setOperatorName] = useState<string>('Agus Pratama');
   const [goodCount, setGoodCount] = useState<number>(25);
   const [scrapCount, setScrapCount] = useState<number>(0);
@@ -56,6 +59,7 @@ export const ShopFloorTerminal: React.FC<ShopFloorTerminalProps> = ({
   const [listFilter, setListFilter] = useState<'station' | 'ready' | 'all'>('station');
 
   const selectedWc = workCenters.find((w) => w.id === selectedWcId) || workCenters[0];
+  const activeEmployee = INITIAL_EMPLOYEES.find((e) => e.nik === selectedOperatorNik || e.fullName === operatorName);
 
   // Find operations assigned to this work center across all active orders
   const assignedOperations: {
@@ -119,16 +123,32 @@ export const ShopFloorTerminal: React.FC<ShopFloorTerminalProps> = ({
         </div>
 
         {/* Work Center Station Dropdown & Operator Badge */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 text-xs bg-slate-800 px-3 py-1.5 rounded border border-slate-700">
             <User className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-slate-300 font-medium">Operator:</span>
-            <input
-              type="text"
-              value={operatorName}
-              onChange={(e) => setOperatorName(e.target.value)}
-              className="bg-transparent text-white font-semibold focus:outline-none w-28"
-            />
+            <span className="text-slate-300 font-medium">Operator NIK:</span>
+            <select
+              value={selectedOperatorNik}
+              onChange={(e) => {
+                const nik = e.target.value;
+                setSelectedOperatorNik(nik);
+                const found = INITIAL_EMPLOYEES.find((emp) => emp.nik === nik);
+                if (found) setOperatorName(found.fullName);
+              }}
+              className="bg-transparent text-white font-semibold focus:outline-none cursor-pointer text-xs"
+            >
+              {INITIAL_EMPLOYEES.map((emp) => (
+                <option key={emp.id} value={emp.nik} className="bg-slate-900 text-white">
+                  {emp.nik} — {emp.fullName} ({emp.positionTitle})
+                </option>
+              ))}
+            </select>
+            {activeEmployee && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-mono bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/80">
+                <BadgeCheck className="w-3 h-3" />
+                Verified
+              </span>
+            )}
           </div>
 
           <select

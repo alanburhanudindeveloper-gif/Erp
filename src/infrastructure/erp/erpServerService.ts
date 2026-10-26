@@ -6,8 +6,10 @@ import {
   INITIAL_DEMANDS,
   INITIAL_MACHINES,
   INITIAL_MANPOWER,
+  INITIAL_NCRS,
   INITIAL_PRODUCTION_ORDERS,
   INITIAL_PRODUCTS,
+  INITIAL_QUALITY_INSPECTIONS,
   INITIAL_ROUTINGS,
   INITIAL_TESTING_SCENARIOS,
   INITIAL_WORK_CENTERS,
@@ -19,6 +21,7 @@ import { summarizeProductionPlanning } from '../../modules/planning/planningServ
 import { generateFiniteScheduleSlots } from '../../modules/scheduling/schedulingService';
 import { summarizeTestingMatrix } from '../../modules/testing/testingService';
 import { createWorkflowInstance, getActiveWorkflowState } from '../../modules/workflow/workflowService';
+import { explodeBom } from '../../modules/manufacturing/bomExplosionService';
 import type { BillOfMaterials, Product, ProductionOrder, WorkflowDefinition } from '../../types';
 
 export interface ErpInventoryItem {
@@ -184,4 +187,30 @@ export function getCapacityOverview() {
 
 export function getTestingOverview() {
   return summarizeTestingMatrix(INITIAL_TESTING_SCENARIOS);
+}
+
+export function getQualityOverview() {
+  const inspections = INITIAL_QUALITY_INSPECTIONS;
+  const ncrs = INITIAL_NCRS;
+  const passedCount = inspections.filter((i) => i.result === 'PASS').length;
+  const failedCount = inspections.filter((i) => i.result === 'FAIL').length;
+  const openNcrs = ncrs.filter((n) => n.status === 'OPEN').length;
+
+  return {
+    totalInspections: inspections.length,
+    passedCount,
+    failedCount,
+    passRatePct: inspections.length > 0 ? Math.round((passedCount / inspections.length) * 1000) / 10 : 100,
+    openNcrs,
+    recentInspections: inspections.slice(0, 5),
+    activeNcrs: ncrs.filter((n) => n.status === 'OPEN'),
+  };
+}
+
+export function getBomExplosionOverview(productId?: string, quantity: number = 100) {
+  const targetProduct = productId
+    ? INITIAL_PRODUCTS.find((p) => p.id === productId || p.sku === productId) || INITIAL_PRODUCTS[0]
+    : INITIAL_PRODUCTS[0];
+
+  return explodeBom(targetProduct.id, quantity, INITIAL_PRODUCTS, INITIAL_BOMS);
 }

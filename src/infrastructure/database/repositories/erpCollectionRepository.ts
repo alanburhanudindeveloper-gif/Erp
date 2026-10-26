@@ -1,7 +1,7 @@
 import { createInMemoryErpRepository, type InMemoryRecord } from './inMemoryErpRepository';
 import { assertErpSourceOfTruth } from '../persistencePolicy';
 
-export interface ErpCollectionRepository<T extends InMemoryRecord = InMemoryRecord> {
+export interface ErpCollectionRepository<T extends object = object> {
   list(): T[];
   get(id: string): T | undefined;
   save(records: T[]): T[];
@@ -10,7 +10,7 @@ export interface ErpCollectionRepository<T extends InMemoryRecord = InMemoryReco
   clear(): void;
 }
 
-export function createErpCollectionRepository<T extends InMemoryRecord>(
+export function createErpCollectionRepository<T extends object>(
   collectionName: string,
   initialRecords: T[] = []
 ): ErpCollectionRepository<T> {

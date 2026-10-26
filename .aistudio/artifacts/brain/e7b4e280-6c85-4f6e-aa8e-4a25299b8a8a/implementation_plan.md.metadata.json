@@ -1,0 +1,6 @@
+{
+  "summary":  "Comprehensive Foundation-First ERP Architecture Refactoring Plan: maps out Stage 1 audit (docs/architecture/ARCHITECTURE_AUDIT.md), Stage 2 engineering contract (ERP_ARCHITECTURE.md & AGENTS.md), Stage 3 God Object extraction of manufacturingService into domain repositories and services, Stage 4 persistence boundary readiness (in-memory adapter ready for Postgres/Drizzle), and Stage 5 domain-owned types decoupling.",
+  "updatedAt":  "2026-10-26T13:54:56.421455952Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

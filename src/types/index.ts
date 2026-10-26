@@ -1379,4 +1379,166 @@ export interface MultiLevelBomNode {
   children?: MultiLevelBomNode[];
 }
 
+// ============================================================================
+// ENTERPRISE GOVERNANCE, ORGANIZATION & GENERIC WORKFLOW (Domains 1-10)
+// ============================================================================
 
+export interface Company {
+  id: string;
+  code: string;
+  name: string;
+  taxNumber: string;
+  currency: string;
+  headquartersAddress: string;
+  active: boolean;
+}
+
+export interface PlantMaster {
+  id: string;
+  companyId: string;
+  code: string; // e.g. "PLANT-01", "PLANT-02"
+  name: string; // e.g. "Batam Assembly Plant", "Cikarang Component Plant"
+  location: string;
+  timezone: string;
+  workingDaysPerWeek: number;
+  shiftsPerDay: number;
+  active: boolean;
+}
+
+export interface DepartmentMaster {
+  id: string;
+  plantId: string;
+  code: string; // e.g. "DEPT-PPIC", "DEPT-PROD", "DEPT-QA"
+  name: string;
+  headPositionId?: string;
+  costCenterCode: string;
+  active: boolean;
+}
+
+export interface SectionMaster {
+  id: string;
+  departmentId: string;
+  code: string; // e.g. "SEC-STAMPING", "SEC-ASSEMBLY-A"
+  name: string;
+  supervisorPositionId?: string;
+  active: boolean;
+}
+
+export interface PositionMaster {
+  id: string;
+  departmentId: string;
+  code: string; // e.g. "POS-MGR-PPIC", "POS-SPV-PROD", "POS-OP-CNC"
+  title: string;
+  parentPositionId?: string; // Reporting Hierarchy
+  approvalAuthorityLimit: number; // Max financial/qty authority
+  canApprovePlan: boolean;
+  canApprovePO: boolean;
+  active: boolean;
+}
+
+export type EmploymentStatus = 'PERMANENT' | 'CONTRACT' | 'PROBATION';
+
+export interface EmployeeSkillRecord {
+  skillCode: string;
+  skillName: string;
+  level: number; // 1 to 5
+  certifiedDate: string;
+}
+
+export interface EmployeeMaster {
+  id: string;
+  nik: string; // Nomor Induk Karyawan, e.g. "EMP-2026-0412"
+  fullName: string;
+  plantId: string;
+  departmentId: string;
+  sectionId?: string;
+  positionId: string;
+  positionTitle: string;
+  supervisorNik?: string;
+  employmentStatus: EmploymentStatus;
+  skills: EmployeeSkillRecord[];
+  dailyWorkingHours: number;
+  hourlyRate: number;
+  active: boolean;
+  linkedUserId?: string; // Optional 1-to-1 link to application User
+}
+
+export interface UserAccount {
+  id: string;
+  username: string;
+  email: string;
+  fullName: string;
+  employeeId?: string; // Linked NIK
+  roles: string[]; // e.g. ["PPIC_PLANNER", "SUPERVISOR"]
+  plantScope: string[]; // e.g. ["PLANT-01", "PLANT-02"] or ["ALL"]
+  permissionTokens: string[]; // Format: domain.entity.action
+  isActive: boolean;
+  delegatedApproverId?: string; // For leaves/delegation
+  delegationExpiresAt?: string;
+  lastLoginAt?: string;
+}
+
+export type ApprovalTransactionType =
+  | 'PRODUCTION_PLAN'
+  | 'PURCHASE_REQUISITION'
+  | 'BOM_CHANGE'
+  | 'WORK_ORDER_DISPATCH'
+  | 'NCR_DISPOSITION'
+  | 'CAPACITY_OVERRIDE';
+
+export interface ApprovalMatrixLevelConfig {
+  level: number;
+  positionCode?: string;
+  roleRequired: string;
+  authorityTitle: string;
+  slaHours: number;
+}
+
+export interface ApprovalMatrixRule {
+  id: string;
+  approvalType: ApprovalTransactionType;
+  plantId: string; // 'ALL' or specific plantId
+  title: string;
+  description: string;
+  minAmount?: number;
+  maxAmount?: number;
+  minQuantity?: number;
+  maxQuantity?: number;
+  levels: ApprovalMatrixLevelConfig[];
+  active: boolean;
+}
+
+export interface ApprovalLevelStatus {
+  level: number;
+  authorityTitle: string;
+  roleRequired: string;
+  positionCode?: string;
+  approverName?: string;
+  approverRole?: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'SKIPPED' | 'DELEGATED';
+  decisionDate?: string;
+  reason?: string;
+  slaDueDate: string;
+  isEscalated?: boolean;
+}
+
+export interface ApprovalTransactionRequest {
+  id: string;
+  requestNumber: string; // e.g. "APP-2026-001"
+  approvalType: ApprovalTransactionType;
+  referenceId: string; // e.g. "PP-2026-001", "PR-2026-004"
+  referenceTitle: string;
+  plantId: string;
+  plantName: string;
+  requesterId: string;
+  requesterName: string;
+  requesterPosition: string;
+  submittedAt: string;
+  totalQuantity?: number;
+  totalAmount?: number;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ESCALATED' | 'CANCELLED';
+  currentLevel: number;
+  totalLevels: number;
+  levels: ApprovalLevelStatus[];
+  metadata?: Record<string, any>; // snapshot of constraints, items, financial total
+}
