@@ -78,100 +78,7 @@ app.get('/api/erp/bom-explosion', requireErpAuth({ requiredRoles: ['Planner', 'S
   res.json({ explosion: getBomExplosionOverview(productId, isNaN(quantity) ? 100 : quantity) });
 });
 
-// In-memory AI Budget, Caching, and Telemetry store (Section 6.5 & Section 7)
-interface AiUsageStats {
-  totalRequests: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  estimatedCostUsd: number;
-  monthlyBudgetUsd: number;
-  killSwitchActive: boolean;
-  cacheHits: number;
-  cacheMisses: number;
-  lastCalls: {
-    id: string;
-    task: string;
-    model: string;
-    tokens: number;
-    cost: number;
-    timestamp: string;
-    cached: boolean;
-  }[];
-}
-
-const aiStats: AiUsageStats = {
-  totalRequests: 14,
-  totalInputTokens: 18450,
-  totalOutputTokens: 6200,
-  estimatedCostUsd: 0.0032,
-  monthlyBudgetUsd: 25.0,
-  killSwitchActive: false,
-  cacheHits: 6,
-  cacheMisses: 14,
-  lastCalls: [
-    {
-      id: 'call-101',
-      task: 'EXTRACT_PO_DOCUMENT',
-      model: 'gemini-3.8-flash',
-      tokens: 1240,
-      cost: 0.00021,
-      timestamp: '2026-10-22 09:15',
-      cached: false,
-    },
-    {
-      id: 'call-102',
-      task: 'GENERATE_WORK_INSTRUCTION',
-      model: 'gemini-3.8-flash',
-      tokens: 2100,
-      cost: 0.00045,
-      timestamp: '2026-10-22 10:02',
-      cached: false,
-    },
-    {
-      id: 'call-103',
-      task: 'ANALYZE_SCRAP_SPIKE',
-      model: 'gemini-3.8-flash',
-      tokens: 1680,
-      cost: 0.00029,
-      timestamp: '2026-10-22 11:40',
-      cached: true,
-    },
-  ],
-};
-
-const aiCache = new Map<string, { result: any; timestamp: number }>();
-const CACHE_TTL_MS = 1000 * 60 * 30; // 30 minutes cache
-
-// Helper to record usage
-function recordAiUsage(task: string, inputTokens: number, outputTokens: number, cached: boolean) {
-  const model = 'gemini-3.8-flash';
-  // Gemini 3.8 Flash pricing estimate (~$0.075 / 1M input, ~$0.30 / 1M output)
-  const cost = cached ? 0 : (inputTokens * 0.000000075 + outputTokens * 0.0000003);
-
-  aiStats.totalRequests += 1;
-  if (cached) {
-    aiStats.cacheHits += 1;
-  } else {
-    aiStats.cacheMisses += 1;
-    aiStats.totalInputTokens += inputTokens;
-    aiStats.totalOutputTokens += outputTokens;
-    aiStats.estimatedCostUsd += cost;
-  }
-
-  aiStats.lastCalls.unshift({
-    id: `call-${Date.now()}`,
-    task,
-    model,
-    tokens: inputTokens + outputTokens,
-    cost: Number(cost.toFixed(6)),
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    cached,
-  });
-
-  if (aiStats.lastCalls.length > 20) {
-    aiStats.lastCalls.pop();
-  }
-}
+import { aiTelemetryService } from './src/infrastructure/ai/aiTelemetryService.ts';
 
 // Initialize Gemini Client
 const apiKey = process.env.GEMINI_API_KEY;
@@ -211,7 +118,7 @@ async function callGeminiWithTimeout(prompt: string, timeoutMs = 5000): Promise<
 // 1. Telemetry & Budget API (Section 6.5)
 app.get('/api/ai/budget', (_req, res) => {
   res.json({
-    ...aiStats,
+    ...aiTelemetryService.getStats(),
     isConfigured: Boolean(apiKey),
     activeModel: 'gemini-3.8-flash',
     provider: 'Google GenAI (Gemini 3.8 Flash)',
@@ -220,23 +127,19 @@ app.get('/api/ai/budget', (_req, res) => {
 
 app.post('/api/ai/budget/toggle-kill-switch', (req, res) => {
   const { active } = req.body;
-  aiStats.killSwitchActive = Boolean(active);
-  res.json({ success: true, killSwitchActive: aiStats.killSwitchActive });
+  const killSwitchActive = aiTelemetryService.setKillSwitch(Boolean(active));
+  res.json({ success: true, killSwitchActive });
 });
 
 // Guard helper: check budget / kill switch
 function checkAiAvailability(res: express.Response): boolean {
-  if (aiStats.killSwitchActive) {
+  const status = aiTelemetryService.isAvailable();
+  if (!status.available) {
+    const isKillSwitch = aiTelemetryService.getStats().killSwitchActive;
     res.status(503).json({
-      error: 'AI Kill Switch is currently ACTIVE. ERP operations continue deterministically without LLM invocations.',
-      killSwitchActive: true,
-    });
-    return false;
-  }
-  if (aiStats.estimatedCostUsd >= aiStats.monthlyBudgetUsd) {
-    res.status(503).json({
-      error: 'Monthly AI budget limit reached ($25.00). LLM calls throttled to preserve operating cost.',
-      budgetExceeded: true,
+      error: status.reason,
+      killSwitchActive: isKillSwitch,
+      budgetExceeded: !isKillSwitch,
     });
     return false;
   }
@@ -253,10 +156,10 @@ app.post('/api/ai/extract-document', async (req, res) => {
   }
 
   const cacheKey = `extract_${docType}_${documentText.slice(0, 100)}`;
-  const cached = aiCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    recordAiUsage('EXTRACT_DOCUMENT', 400, 300, true);
-    return res.json({ result: cached.result, cached: true });
+  const cached = aiTelemetryService.getCachedResult(cacheKey);
+  if (cached) {
+    aiTelemetryService.recordUsage('EXTRACT_DOCUMENT', 400, 300, true);
+    return res.json({ result: cached, cached: true });
   }
 
   // Schema prompt
@@ -292,8 +195,8 @@ Return ONLY valid JSON. No conversational text or markdown codeblocks outside th
     try {
       const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleanJson);
-      recordAiUsage('EXTRACT_DOCUMENT', 650, 420, false);
-      aiCache.set(cacheKey, { result: parsed, timestamp: Date.now() });
+      aiTelemetryService.recordUsage('EXTRACT_DOCUMENT', 650, 420, false);
+      aiTelemetryService.setCachedResult(cacheKey, parsed);
       return res.json({ result: parsed, cached: false });
     } catch (parseErr) {
       console.warn('[AI Extract Parse Error] fallback to domain schema', parseErr);
@@ -335,7 +238,7 @@ Return ONLY valid JSON. No conversational text or markdown codeblocks outside th
     extractedSummary: 'Extracted 2 line items from PT Steel Indo Perkasa quotation with high OCR confidence.',
   };
 
-  recordAiUsage('EXTRACT_DOCUMENT', 450, 280, false);
+  aiTelemetryService.recordUsage('EXTRACT_DOCUMENT', 450, 280, false);
   res.json({ result: fallbackResult, cached: false, fallback: true });
 });
 
@@ -346,10 +249,10 @@ app.post('/api/ai/generate-wi', async (req, res) => {
   const { productSku, productName, operationCode, operationName, workCenterCode, components = [] } = req.body;
 
   const cacheKey = `wi_${productSku}_${operationCode}`;
-  const cached = aiCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    recordAiUsage('GENERATE_WORK_INSTRUCTION', 600, 500, true);
-    return res.json({ result: cached.result, cached: true });
+  const cached = aiTelemetryService.getCachedResult(cacheKey);
+  if (cached) {
+    aiTelemetryService.recordUsage('GENERATE_WORK_INSTRUCTION', 600, 500, true);
+    return res.json({ result: cached, cached: true });
   }
 
   const prompt = `You are a Senior Industrial Manufacturing Engineer.
@@ -385,8 +288,8 @@ Return ONLY valid JSON.`;
     try {
       const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleanJson);
-      recordAiUsage('GENERATE_WORK_INSTRUCTION', 850, 680, false);
-      aiCache.set(cacheKey, { result: parsed, timestamp: Date.now() });
+      aiTelemetryService.recordUsage('GENERATE_WORK_INSTRUCTION', 850, 680, false);
+      aiTelemetryService.setCachedResult(cacheKey, parsed);
       return res.json({ result: parsed, cached: false });
     } catch (parseErr) {
       console.warn('[AI WI Parse Error] fallback to domain schema', parseErr);
@@ -439,7 +342,7 @@ Return ONLY valid JSON.`;
     ],
   };
 
-  recordAiUsage('GENERATE_WORK_INSTRUCTION', 600, 450, false);
+  aiTelemetryService.recordUsage('GENERATE_WORK_INSTRUCTION', 600, 450, false);
   res.json({ result: fallbackWI, cached: false, fallback: true });
 });
 
@@ -478,7 +381,7 @@ Return ONLY valid JSON.`;
     try {
       const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleanJson);
-      recordAiUsage('ANALYZE_KPI', 720, 510, false);
+      aiTelemetryService.recordUsage('ANALYZE_KPI', 720, 510, false);
       return res.json({ result: parsed, cached: false });
     } catch (parseErr) {
       console.warn('[AI KPI Parse Error] fallback to domain schema', parseErr);
@@ -517,7 +420,7 @@ Return ONLY valid JSON.`;
     confidenceScore: 92,
   };
 
-  recordAiUsage('ANALYZE_KPI', 500, 390, false);
+  aiTelemetryService.recordUsage('ANALYZE_KPI', 500, 390, false);
   res.json({ result: fallbackAnalysis, cached: false, fallback: true });
 });
 
@@ -557,7 +460,7 @@ Return ONLY valid JSON.`;
     try {
       const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleanJson);
-      recordAiUsage('ROOT_CAUSE_ANALYSIS', 890, 590, false);
+      aiTelemetryService.recordUsage('ROOT_CAUSE_ANALYSIS', 890, 590, false);
       return res.json({ result: parsed, cached: false });
     } catch (parseErr) {
       console.warn('[AI Root Cause Parse Error] fallback to domain schema', parseErr);
@@ -599,7 +502,7 @@ Return ONLY valid JSON.`;
     containmentAction: 'Quarantine WIP pallet W-0124-B immediately; notify assembly lead to halt feed from Batch 4.',
   };
 
-  recordAiUsage('ROOT_CAUSE_ANALYSIS', 620, 480, false);
+  aiTelemetryService.recordUsage('ROOT_CAUSE_ANALYSIS', 620, 480, false);
   res.json({ result: fallbackRootCause, cached: false, fallback: true });
 });
 
@@ -643,7 +546,7 @@ app.post('/api/ai/suggest-schedule', async (req, res) => {
     requiresApproval: true,
   };
 
-  recordAiUsage('SUGGEST_SCHEDULE', 710, 520, false);
+  aiTelemetryService.recordUsage('SUGGEST_SCHEDULE', 710, 520, false);
   res.json({ result: fallbackProposal, cached: false });
 });
 
@@ -674,7 +577,7 @@ app.post('/api/ai/management-report', async (req, res) => {
     analystSignoff: 'AI Intelligence Layer + Verified by Lead Production Controller',
   };
 
-  recordAiUsage('GENERATE_MANAGEMENT_REPORT', 820, 610, false);
+  aiTelemetryService.recordUsage('GENERATE_MANAGEMENT_REPORT', 820, 610, false);
   res.json({ result: fallbackReport, cached: false });
 });
 

@@ -163,6 +163,15 @@ import {
   rejectPurchaseRequisitionDecision,
 } from '../../modules/procurement/procurementService';
 import { evaluateGoodsReceipt } from '../../modules/procurement/goodsReceiptService';
+import { createWorkOrderRepository, type IWorkOrderRepository } from '../../modules/manufacturing/workOrderRepository';
+import { planWorkOrder, cancelWorkOrder } from '../../modules/manufacturing/workOrderService';
+import { createInventoryRepository, type IInventoryRepository } from '../../modules/inventory/inventoryRepository';
+import { createQualityRepository, type IQualityRepository } from '../../modules/quality/qualityRepository';
+
+// Authoritative Domain Repositories (Modular Monolith Persistence Seam)
+export const workOrderRepository: IWorkOrderRepository = createWorkOrderRepository();
+export const inventoryRepository: IInventoryRepository = createInventoryRepository();
+export const qualityRepository: IQualityRepository = createQualityRepository();
 
 export interface ErpState {
   products: Product[];
@@ -397,6 +406,8 @@ export function useErpStore() {
         return prev;
       }
 
+      workOrderRepository.save(decision.updatedOrder);
+
       return {
         ...prev,
         productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? decision.updatedOrder! : o)),
@@ -417,6 +428,8 @@ export function useErpStore() {
       if (!decision.allowed || !decision.updatedOrder || !decision.auditLog) {
         return prev;
       }
+
+      workOrderRepository.save(decision.updatedOrder);
 
       const op = order.operations.find((o) => o.sequence === operationSequence);
       const updatedWorkCenters = op
@@ -472,6 +485,9 @@ export function useErpStore() {
         return prev;
       }
 
+      workOrderRepository.save(decision.updatedOrder);
+      decision.stockMovements?.forEach((m) => inventoryRepository.recordMovement(m));
+
       return {
         ...prev,
         stockMovements: [...(decision.stockMovements ?? []), ...prev.stockMovements],
@@ -496,6 +512,8 @@ export function useErpStore() {
       if (!decision.allowed || !decision.updatedOrder || !decision.auditLog) {
         return prev;
       }
+
+      workOrderRepository.save(decision.updatedOrder);
 
       const updatedWorkCenters = prev.workCenters.map((wc) => {
         if (wc.id === op.workCenterId) {
@@ -530,6 +548,8 @@ export function useErpStore() {
       if (!decision.allowed || !decision.updatedOrder || !decision.auditLog) {
         return prev;
       }
+
+      workOrderRepository.save(decision.updatedOrder);
 
       return {
         ...prev,
@@ -575,6 +595,8 @@ export function useErpStore() {
       productCatalog: state.products,
     });
 
+    workOrderRepository.save(newOrder);
+
     setState((prev) => ({
       ...prev,
       productionOrders: [newOrder, ...prev.productionOrders],
@@ -583,6 +605,54 @@ export function useErpStore() {
     addNotification('success', `Created Planned Order ${orderNum} for ${data.quantity} units of ${product.sku} (Snapshot: ${newOrder.productRevision}, BOM: ${newOrder.bomRevision}).`);
     return newOrder;
   }, [state.products, state.boms, state.routings, state.productReleases, state.productionOrders.length, addNotification]);
+
+  // 7.1 planWorkOrderById
+  const planWorkOrderById = useCallback((orderId: string, bomId?: string, routingId?: string) => {
+    setState((prev) => {
+      const order = prev.productionOrders.find((o) => o.id === orderId);
+      if (!order) return prev;
+      const targetBomId = bomId || order.bomId;
+      const targetRoutingId = routingId || order.routingId;
+      const bom = prev.boms.find((b) => b.id === targetBomId) || prev.boms[0];
+      const routing = prev.routings.find((r) => r.id === targetRoutingId) || prev.routings[0];
+
+      const result = planWorkOrder(order, bom, routing, prev.currentUser.name, prev.currentUser.role);
+      if (!result.allowed || !result.updatedOrder || !result.auditLog) {
+        return prev;
+      }
+
+      workOrderRepository.save(result.updatedOrder);
+
+      return {
+        ...prev,
+        productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? result.updatedOrder! : o)),
+        auditLogs: [result.auditLog, ...prev.auditLogs],
+      };
+    });
+    addNotification('success', `Work order ${orderId} has been PLANNED with approved BOM and Routing.`);
+  }, [addNotification]);
+
+  // 7.2 cancelWorkOrderById
+  const cancelWorkOrderById = useCallback((orderId: string, reason: string) => {
+    setState((prev) => {
+      const order = prev.productionOrders.find((o) => o.id === orderId);
+      if (!order) return prev;
+
+      const result = cancelWorkOrder(order, prev.currentUser.name, prev.currentUser.role, reason);
+      if (!result.allowed || !result.updatedOrder || !result.auditLog) {
+        return prev;
+      }
+
+      workOrderRepository.save(result.updatedOrder);
+
+      return {
+        ...prev,
+        productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? result.updatedOrder! : o)),
+        auditLogs: [result.auditLog, ...prev.auditLogs],
+      };
+    });
+    addNotification('warning', `Work order ${orderId} CANCELLED. Justification: ${reason}`);
+  }, [addNotification]);
 
   // 8. reportMachineBreakdown (Page 101)
   const reportMachineBreakdown = useCallback((
@@ -1027,6 +1097,10 @@ export function useErpStore() {
         reason: `Posted receipt ${grnNumber} for ${po.poNumber}. Stock bucket disposition: ${newGrn.stockBucketSummary}`,
       };
 
+      newMovements.forEach((m) => inventoryRepository.recordMovement(m));
+      newInspections.forEach((i) => qualityRepository.saveInspection(i));
+      updatedProducts.forEach((p) => inventoryRepository.saveProduct(p));
+
       setState((prev) => ({
         ...prev,
         goodsReceiptNotes: [newGrn, ...prev.goodsReceiptNotes],
@@ -1114,6 +1188,16 @@ export function useErpStore() {
         reason: notes || `QC evaluation complete: Result ${decision}, Disposition ${disposition}.`,
       };
 
+      newMovements.forEach((m) => inventoryRepository.recordMovement(m));
+      newNcrs.forEach((n) => qualityRepository.saveNcr(n));
+      qualityRepository.saveInspection({
+        ...qc,
+        result: decision,
+        disposition,
+        inspector: state.currentUser.name,
+        notes: `${qc.notes || ''} [Decision: ${decision}/${disposition}] ${notes}`,
+      });
+
       setState((prev) => ({
         ...prev,
         inspections: prev.inspections.map((i) =>
@@ -1162,6 +1246,8 @@ export function useErpStore() {
         addNotification('error', errorMsg);
         return { success: false, error: errorMsg };
       }
+
+      inventoryRepository.recordMovement(decision.movement);
 
       setState((prev) => ({
         ...prev,
@@ -2427,5 +2513,10 @@ export function useErpStore() {
     addEmployee,
     updateEmployeeStatus,
     updateChangeoverRule,
+    planWorkOrderById,
+    cancelWorkOrderById,
   };
 }
+
+// Facade alias for backward compatibility across modular views
+export const useManufacturing = useErpStore;

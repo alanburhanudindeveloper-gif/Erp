@@ -1,153 +1,178 @@
-# ERP Architecture Audit (Phase 0 Discovery)
+# Manufacturing ERP — Comprehensive Architecture Audit (Phase 0)
 
-Date: 2026-10-26  
-Status: Baseline Discovery Complete  
-Target: Production-Grade Modular Monolith  
+Date: 2026-10-27  
+Status: Phase 0 Discovery & Baseline Complete  
+Target Architecture: Production-Ready Modular Monolith  
 
 ---
 
 ## 1. Executive Summary
 
-This audit assesses the structural health of the Manufacturing ERP repository. The application currently functions as a full-stack system consisting of an Express HTTP server (`server.ts`) and a Vite + React SPA frontend. 
+This architecture audit evaluates the structure, dependencies, state management, and persistence strategy of the Manufacturing ERP repository. The application functions as an enterprise discrete manufacturing system with an Express + TypeScript server and a React 19 + TypeScript SPA frontend.
 
-While core business capabilities (finite capacity planning, multi-level BOM explosion, 5-bucket inventory, multi-tier approval matrix) are implemented and backed by 73 automated unit tests, the architecture exhibits architectural debt typical of rapid prototyping: several massive "God Objects", tightly coupled global state orchestration, and client-heavy data storage.
+The application contains substantial, valuable manufacturing domain logic (multi-level BOM explosion with scrap multipliers, finite capacity scheduling, machine changeover matrices, 5-bucket inventory movements, and multi-tier approval matrices) backed by 76 automated unit tests. However, the application currently suffers from significant architectural entanglement, primarily centered around a massive monolithic God Service (`manufacturingService.ts`, 2,432 LOC), browser `localStorage` coupling, and an oversized monolithic type definition file (`src/types/index.ts`, 1,545 LOC).
 
-This document establishes the empirical baseline for the foundation-first refactoring roadmap.
+This document establishes the empirical basis for Phase 0 discovery and guides the incremental refactoring plan.
 
 ---
 
-## 2. Current Architecture Overview
+## 2. Source Tree & Component Topology
+
+```text
+src/
+├── app/                              # Application bootstrap & entrypoints
+├── components/                       # Shared & common UI presentation
+│   ├── ai/                          # AI modal dialogues & document extractors
+│   ├── common/                      # TanStack DataTable, StatusBadge, Modal primitives
+│   ├── data-grid/                   # Grid column builders & drawer inspection components
+│   └── layout/                      # 3-Pillar Navigation: Sidebar, Topbar, Header Counters
+├── infrastructure/                   # Infrastructure, database, server repositories
+│   ├── database/                    # Persistence policy & ERP collection repositories
+│   │   ├── repositories/            # In-memory store, generic collection repository
+│   │   └── persistencePolicy.ts     # Authoritative storage enforcement (rejects UI keys)
+│   └── erp/                         # Server-side repository facade & overview aggregators
+├── lib/                             # Shared legacy services & seed data
+│   ├── calculations/                # MRP calculation routines
+│   ├── persistence/                 # Storage adapters & serialization guards
+│   ├── services/                    # Legacy orchestrators (manufacturingService, ppicService)
+│   └── mockData.ts                  # Monolithic seed dataset (4,292 LOC)
+├── modules/                         # Domain Bounded Contexts
+│   ├── capacity/                    # Capacity load evaluation & utilization metrics
+│   ├── inventory/                   # 5-Bucket ledger engine & material delivery service
+│   ├── manufacturing/               # BOM explosion, work order lifecycle, shop floor kiosk
+│   ├── planning/                    # Finite MPS, MRP, feasibility analysis, plan dispatch
+│   ├── procurement/                 # PR multi-tier approval, PO drafting, GRN receipt
+│   ├── quality/                     # IQC/IPQC/FQC gates, AQL tolerances, NCR resolution
+│   ├── scheduling/                  # Machine lane Gantt, changeover matrix, shift schedules
+│   ├── security/                    # Server-side authorization, token validation, RBAC
+│   ├── settings/                    # Organization master, Employee vs User manager
+│   ├── testing/                     # Automated scenario testing matrix
+│   └── workflow/                    # Condition-based approval matrix & SLA monitoring
+└── types/                           # Monolithic type declarations (src/types/index.ts)
+```
+
+---
+
+## 3. Dependency Map & Coupling Analysis
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        PRESENTATION (REACT 19 SPA)                     │
-│  • App.tsx: Topbar + Sidebar + Module Routing State                   │
-│  • Operations Views: Manufacturing, Planning, Inventory, Quality       │
-│  • Workflow View: Approval Center + Decision Drawer                   │
-│  • Settings View: Organization, People, RBAC, Approval Matrix         │
+│  Operations Hub · Workflow Approval Center · Settings & Org Hierarchy │
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    │
               ┌────────────────────┴────────────────────┐
               ▼                                         ▼
 ┌───────────────────────────────┐     ┌──────────────────────────────────┐
-│   LEGACY STATE ORCHESTRATION  │     │   EXTRACTED DOMAIN SERVICES      │
+│   LEGACY GOD ORCHESTRATOR     │     │   EXTRACTED DOMAIN SERVICES      │
 │   manufacturingService.ts     │     │   • bomExplosionService.ts       │
-│   (2,432 LOC God Object)      │────▶│   • shopFloorService.ts          │
-│   • Global React Hook State   │     │   • inventoryLedgerService.ts    │
-│   • Inline Persistence Sync   │     │   • qualityService.ts            │
-│   • LocalStorage Caching      │     │   • workflowMatrixService.ts     │
-│   • Cross-Domain Dispatch     │     │   • planningService.ts           │
-└───────────────────────────────┘     │   • schedulingService.ts         │
+│   (2,432 LOC)                 │────▶│   • shopFloorService.ts          │
+│   • 35+ useState variables    │     │   • workOrderService.ts          │
+│   • Direct localStorage sync  │     │   • inventoryLedgerService.ts    │
+│   • Cross-domain action hook  │     │   • qualityService.ts            │
+└───────────────────────────────┘     │   • workflowMatrixService.ts     │
+                                      │   • planningService.ts           │
+                                      │   • schedulingService.ts         │
                                       └──────────────────────────────────┘
                                                         │
                                                         ▼
 ┌────────────────────────────────────────────────────────────────────────┐
+│                   PERSISTENCE BOUNDARIES (REPOSITORIES)                │
+│   • IWorkOrderRepository (productionorders)                            │
+│   • IInventoryRepository (stockmovements, products)                    │
+│   • IQualityRepository (qualityinspections, ncrs)                      │
+│   • PersistencePolicy: Enforces ERP_AUTHORITATIVE collection naming    │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │
+                                   ▼
+┌────────────────────────────────────────────────────────────────────────┐
 │                      EXPRESS SERVER & API BOUNDARY                     │
-│  • server.ts (695 LOC): Server Bootstrap + AI Gateway + Telemetry      │
-│  • Middleware: requireErpAuth (Role/Token Protected ERP Routes)        │
-│  • erpServerService.ts: Repository facade for server-side ERP state    │
-│  • erpServerRepository.ts: In-memory store (Postgres relational seam)  │
+│  • server.ts (710 LOC): HTTP Bootstrap, AI Gateway, Role Auth         │
+│  • Protected Routes: /api/erp/* with requireErpAuth                    │
+│  • Server Repository: In-memory store (PostgreSQL/Drizzle seam)        │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## 3. Dependency Map & Direction Analysis
-
-### Critical Dependency Paths
-1. **Planning & Scheduling**:
-   `PlanningView.tsx` $\rightarrow$ `useManufacturing()` (`manufacturingService.ts`) $\rightarrow$ delegates to `planningService.ts` / `schedulingService.ts` $\rightarrow$ reads `INITIAL_PRODUCTS` / `INITIAL_BOMS` / `INITIAL_MACHINES`.
-2. **Manufacturing Execution**:
-   `ManufacturingView.tsx` / `ShopFloorTerminal.tsx` $\rightarrow$ `useManufacturing()` $\rightarrow$ `productionExecutionService.ts` / `shopFloorService.ts` $\rightarrow$ mutates React state $\rightarrow$ writes to `localStorage`.
-3. **Inventory & Movement Ledger**:
-   `InventoryView.tsx` $\rightarrow$ `useManufacturing()` $\rightarrow$ `inventoryLedgerService.ts` / `materialRequestService.ts` $\rightarrow$ writes `StockMovement` records into in-memory array and `localStorage`.
-4. **Approval Governance**:
-   `WorkflowView.tsx` / `Topbar.tsx` $\rightarrow$ `workflowMatrixService.ts` $\rightarrow$ evaluates condition rules against `ApprovalTransactionRequest`.
-5. **Server Endpoints**:
-   `server.ts` $\rightarrow$ `requireErpAuth` $\rightarrow$ `erpServerService.ts` $\rightarrow$ `createErpServerRepository()` (in-memory store).
-
-### Architectural Boundary Violations Identified
-* **UI $\rightarrow$ LocalStorage**: Direct browser storage calls bypass the server authorization boundary and prevent relational multi-user synchronization.
-* **UI State $\leftrightarrow$ ERP Source of Truth**: React component state in `manufacturingService.ts` currently acts as the runtime source of truth for work orders and stock levels instead of an authoritative backend repository.
-* **Cross-Domain Entanglement**: `manufacturingService.ts` manages state for 15+ disparate domains simultaneously (Procurement, Maintenance, Tooling, NPI, Testing, Capacity, Costing).
+### Key Coupling Patterns Identified:
+1. **Presentation Coupled to State Orchestrator**:
+   18 distinct UI views (`ManufacturingView`, `InventoryView`, `QualityView`, `PlanningView`, etc.) consume `useManufacturing()`, creating a tight coupling where a change to any state variable triggers re-renders across unrelated tabs.
+2. **State Orchestrator Coupled to LocalStorage**:
+   `manufacturingService.ts` serializes entire domain collections into browser `localStorage` via `erpStorageAdapter.ts`. This breaks multi-user ERP invariants, risks silent storage quota crashes, and bypasses server transaction isolation.
+3. **Domain Services Delegated but State Retained in Hook**:
+   While pure calculation routines (`bomExplosionService`, `workflowMatrixService`, `planningService`) have been extracted, the results and state arrays are still held in React memory inside `manufacturingService.ts`.
 
 ---
 
-## 4. God Objects Audit
+## 4. God Objects Audit & Inventory
 
-| God Object File | LOC | Core Responsibilities | Direct Consumers | Inbound / Outbound Coupling | Refactoring Strategy |
-| :--- | :---: | :--- | :--- | :--- | :--- |
-| `src/lib/services/manufacturingService.ts` | 2,432 | React state provider, 40+ useState hooks, localStorage sync, CRUD for all ERP entities, action dispatchers. | 18 UI Views, Navigation bars, Modals | **Extreme High**: Imports 60+ types, 40+ mock datasets. | Convert into a thin delegating facade; extract domain state into dedicated domain repositories and custom hooks. |
-| `src/types/index.ts` | 1,545 | 100+ interface definitions spanning all ERP domains in a single monolithic file. | Whole codebase | **Extreme High**: Any change triggers full recompilation across 100+ files. | Decompose into domain-owned type modules (`src/modules/*/types.ts`) with a centralized barrel re-export. |
-| `server.ts` | 710 | Express bootstrap, Gemini AI client, PO extractor, Work instruction generator, telemetry, ERP route declarations. | Frontend HTTP callers | **High**: Mixes infrastructure AI proxy with ERP business authorization. | Extract AI gateway and telemetry into `src/infrastructure/ai/`; extract route controllers into modular route definitions. |
-| `src/lib/mockData.ts` | 4,292 | Master seed datasets for items, routings, machines, workflows, org masters, employees, and user accounts. | Services, tests, components | **High**: Monolithic seed store. | Split into domain-specific seed files (`src/infrastructure/database/seeds/*`). |
-
----
-
-## 5. Current Persistence Audit
-
-| Data Entity | Current Storage Location | Authoritative Boundary | Migration Target |
-| :--- | :--- | :--- | :--- |
-| Products & BOMs | Browser `localStorage` + Memory | Frontend UI Store | PostgreSQL `items`, `boms`, `bom_components` |
-| Work Orders & Operations | Browser `localStorage` + Memory | Frontend UI Store | PostgreSQL `work_orders`, `work_order_operations` |
-| Stock Movements & Ledgers | Browser `localStorage` + Memory | Frontend UI Store | PostgreSQL `stock_movements` (Immutable double-entry) |
-| Approval Transactions | In-Memory `mockData.ts` | Local memory | PostgreSQL `approval_transactions`, `approval_logs` |
-| Server API Cache | Server in-memory repository | `erpServerRepository.ts` | PostgreSQL via Drizzle ORM |
-| AI Telemetry & Budgets | Server in-memory `aiStats` | Server memory | PostgreSQL `ai_usage_logs` / Redis cache |
+| God Object | LOC | Responsibilities | Inbound Consumers | Risk Level | Refactoring Action |
+| :--- | :---: | :--- | :--- | :---: | :--- |
+| `src/lib/services/manufacturingService.ts` | 2,432 | React state container, 35+ state hooks, localStorage persistence, dispatching for 15+ sub-domains. | 18 UI Views, Topbar, Sidebar, Traveler Modal | **CRITICAL** | Decompose into domain repositories (`WorkOrderRepository`, `InventoryRepository`, `QualityRepository`) and thin domain-specific React hooks. |
+| `src/types/index.ts` | 1,545 | 110+ interfaces spanning Items, BOMs, Routings, Work Orders, Quality, Procurement, Security, Org. | Whole repository | **HIGH** | Split into domain-owned `types.ts` per module directory; maintain `src/types/index.ts` as a backwards-compatible barrel export. |
+| `server.ts` | 710 | Express bootstrap, Gemini AI API integration, AI token budget/cache, PO document extraction, ERP routes. | External HTTP clients | **HIGH** | Separate into HTTP bootstrap (`server.ts`), modular routes (`src/app/routes/`), and AI infrastructure (`src/infrastructure/ai/`). |
+| `src/lib/mockData.ts` | 4,292 | Monolithic master seed dataset for all ERP entities. | Tests, server, services | **MEDIUM** | Split into domain seed fixtures under `src/infrastructure/database/seeds/`. |
 
 ---
 
-## 6. Current State Management Audit
+## 5. Current State Management & Persistence Strategies
 
-1. **Client-Side State**:
-   - `useManufacturing()` hook in `manufacturingService.ts` holds ~35 state variables (`orders`, `products`, `boms`, `stockMovements`, etc.).
-   - Initialized via lazy initializer from `localStorage.getItem('mfg_...')` or falling back to `mockData.ts`.
-   - Any state mutation triggers `localStorage.setItem(...)`.
-2. **Server-Side State**:
-   - `erpServerRepository.ts` holds in-memory maps for `products`, `boms`, `productionOrders`, and `workflows`.
-   - Seeded on server startup. Changes made on client via UI do not yet persist back to server store.
-3. **Target State Architecture**:
-   - Client holds only **presentation/ephemeral UX state** (active tab, search filter query, drawer open/close, sorting direction).
-   - Server holds authoritative **ERP transactional state**, accessible via typed repository queries and mutating commands.
+### Current State Management Strategy:
+* **UI Ephemeral State**: Local component `useState` for active tabs, search keywords, modal open/close states, and TanStack Table sorting.
+* **Domain State (Legacy)**: Single monolithic React Hook `useManufacturing()` instantiated at the root in `App.tsx` and threaded down to child views via props.
+* **Server State**: `erpServerRepository.ts` maintains in-memory collections populated on server boot.
 
----
+### Current Persistence Strategy:
+* **Client Persistence**: `loadLegacyErpState()` / `saveLegacyErpState()` in `localStorage` under `LEGACY_ERP_STORAGE_KEY`.
+* **Authoritative Persistence Boundary**: `src/infrastructure/database/repositories/` defines `ErpCollectionRepository` and domain repositories (`IWorkOrderRepository`, `IInventoryRepository`, `IQualityRepository`) enforcing `persistencePolicy.ts` rules.
 
-## 7. Current Security Boundary Audit
-
-* **Authentication**: Token-based header simulation via `x-erp-role` and `x-user-id`.
-* **Authorization Middleware**: `requireErpAuth({ requiredRoles: [...] })` enforced on all `/api/erp/*` routes in `server.ts`.
-* **Segregation of Duties (SoD)**: Anti-self-approval strictly enforced in `workflowMatrixService.ts` and `procurementService.ts`.
-* **Risk Identified**: Frontend currently checks role permissions in UI components (`hasPermission()`). Server must remain the sole authoritative security enforcement gate.
+### Problem with Current Persistence:
+* ERP transaction data in `localStorage` violates repository rules in `AGENTS.md`.
+* Client mutations do not automatically sync back to the authoritative server database.
 
 ---
 
-## 8. Current Test Coverage Baseline
+## 6. Manufacturing Domain Knowledge Catalog
 
-* **Total Test Suites**: 13 test files.
-* **Total Automated Tests**: **73 unit tests** (100% passing).
-* **Covered Domains**:
-  - BOM Explosion (`bomExplosionService.test.ts`): Multi-level explosion, scrap, cycle detection.
-  - Shop Floor Kiosk (`shopFloorService.test.ts`): NIK authentication, operator telemetry, scrap alerts.
-  - Inventory Ledger (`inventoryLedgerService.test.ts`): 5-bucket balance, transfer validation, reversals.
-  - Work Order Lifecycle (`workOrderService.test.ts`): DRAFT to PLANNED transitions, cancellations.
-  - Quality & NCR (`qualityService.test.ts`): IQC/IPQC tolerance evaluation, defect routing, NCR resolution.
-  - Workflow Matrix (`workflowMatrixService.test.ts`): Multi-tier conditions, SLA dates, anti-self-approval.
-  - PPIC Capacity & Scheduling (`ppicService.test.ts`, `planningService.test.ts`, `schedulingService.test.ts`).
-  - Security & Authorization (`authorizationService.test.ts`).
-  - Procurement & Receipts (`procurementService.test.ts`, `goodsReceiptService.test.ts`).
-* **Uncovered Areas**:
-  - Legacy `manufacturingService.ts` orchestrator internal hook transitions.
-  - Component rendering edge cases.
+The following manufacturing calculations and logic were audited and **must be preserved without alteration**:
+
+1. **Multi-Level BOM Explosion (`src/modules/manufacturing/bomExplosionService.ts`)**:
+   - Recursive explosion with circular loop detection (`hasCycle`).
+   - Line-by-line scrap allowances: $\text{GrossQty} = \text{TargetQty} \times \text{QuantityPerUnit} \times (1 + \frac{\text{ScrapPercentage}}{100})$.
+   - Net requirements deduction against on-hand available stock.
+   - Critical path lead time calculation.
+
+2. **Finite Capacity & Planning (`src/modules/planning/planningService.ts`)**:
+   - Machine capacity: $\text{AvailableMinutes} = \text{CapacityHoursPerDay} \times 60 \times \text{EfficiencyRate}$.
+   - Workload demand requirement: $\text{RequiredMinutes} = \text{SetupMinutes} + (\text{Quantity} \times \text{RunTimeSecondsPerUnit} / 60)$.
+   - Manpower allocation by shift and skill tier.
+   - Bottleneck line pacing and 5-Pillar constraint analysis (Machine, Manpower, Tooling, Material, Calendar).
+
+3. **Finite Scheduling & Changeover Matrix (`src/modules/scheduling/schedulingService.ts`)**:
+   - Matrix-based sequence changeovers between product categories (e.g. Standard $\rightarrow$ High-Precision setup penalties).
+   - Machine lane Gantt schedule slot generation respecting non-overlapping execution.
+
+4. **Inventory 5-Bucket Conservation (`src/modules/inventory/inventoryLedgerService.ts`)**:
+   - Strict conservation: $\text{Total} = \text{AVAILABLE} + \text{RESERVED} + \text{WIP} + \text{HOLD} + \text{REJECTED}$.
+   - Validation against negative inventory.
+   - Compensating immutable reversal transactions (`REVERSAL`).
+
+5. **Shop Floor Telemetry (`src/modules/manufacturing/shopFloorService.ts`)**:
+   - Real-time cycle pace calculation and efficiency percentage vs standard.
+   - High scrap alarm triggering when scrap rate $\ge 5\%$.
+
+6. **Governance & Segregation of Duties (`src/modules/workflow/workflowMatrixService.ts`)**:
+   - Multi-tier dynamic threshold rules by plant, quantity, and nominal amount.
+   - Strict anti-self-approval rule blocking requesters from signing off on their own orders.
 
 ---
 
-## 9. Ranked Architecture Risks
+## 7. Ranked Architecture Risks
 
-| Risk Level | Risk Factor | Impact | Mitigation Strategy |
+| Severity | Risk Item | Impact | Remediation Strategy |
 | :---: | :--- | :--- | :--- |
-| **CRITICAL** | Authoritative data living in browser `localStorage` | Data corruption on browser clear; no multi-user consistency. | Implement server repository interface layer with in-memory adapter ready for PostgreSQL. |
-| **CRITICAL** | God Object `manufacturingService.ts` | High regression risk when touching any state; impossible to scale modularly. | Extract domain services and convert into delegating facade. |
-| **HIGH** | Monolithic `src/types/index.ts` | Global coupling across all domains; type edits cause cascading recompilation. | Decompose into domain-owned type packages. |
-| **HIGH** | Server bootstrap entangled with AI & Telemetry | Server crashes if AI configuration fails; violates single responsibility. | Extract AI subsystem into `src/infrastructure/ai/`. |
-| **MEDIUM** | Monolithic seed file `mockData.ts` (4.2k LOC) | Difficult to maintain and isolate domain tests. | Split seed data by bounded context. |
-| **LOW** | Client-side search and sorting in UI | Slows down on $>1,000$ records. | Prepare repository pagination seams. |
+| **CRITICAL** | `localStorage` ERP source of truth | Data loss on cache clear; multi-tab inconsistency; lack of relational guarantees. | Shift state management to server repositories with HTTP/API sync. |
+| **CRITICAL** | `manufacturingService.ts` God Object | Any change causes regression risk across all 18 views; unmaintainable cognitive load. | Decompose into domain use cases and domain repository providers. |
+| **HIGH** | Monolithic `src/types/index.ts` | Any interface addition forces recompilation of the entire application. | Decompose into domain-owned types (`src/modules/*/types/`). |
+| **HIGH** | Mixed Server Concerns (`server.ts`) | Server bootstrap fails if external AI credentials/tokens are absent or misconfigured. | Extract AI gateway and telemetry into dedicated infrastructure modules. |
+| **MEDIUM** | Monolithic `mockData.ts` (4.2k LOC) | Bloats test suite memory and makes test data isolation difficult. | Split seed data into domain fixtures. |
+| **LOW** | Client-side data grid filtering on large arrays | Potential UI lag if dataset exceeds 5,000 items. | Prepare server-side pagination contracts. |

@@ -111,32 +111,21 @@ The repository is being refactored incrementally toward a modular monolith with 
 - Formalized [docs/architecture/ERP_ARCHITECTURE.md](architecture/ERP_ARCHITECTURE.md) defining strict module boundaries, inward dependency rules, and server-authoritative security boundaries.
 - Published [docs/architecture/ARCHITECTURE_AUDIT_FINAL.md](architecture/ARCHITECTURE_AUDIT_FINAL.md) tracking before/after architectural transformation.
 
+### AI Gateway Infrastructure Extraction
+- Extracted AI usage telemetry, token tracking, budget enforcement, caching, and kill-switch control from [server.ts](../server.ts) into [src/infrastructure/ai/aiTelemetryService.ts](../src/infrastructure/ai/aiTelemetryService.ts).
+- Replaced inline maps and global counters in `server.ts` with calls to `aiTelemetryService`.
+- Regression suite in [src/infrastructure/ai/aiTelemetryService.test.ts](../src/infrastructure/ai/aiTelemetryService.test.ts).
+
+### Domain-Owned Types Decoupling
+- Extracted domain-specific types into [src/modules/manufacturing/types/index.ts](../src/modules/manufacturing/types/index.ts), [src/modules/inventory/types/index.ts](../src/modules/inventory/types/index.ts), [src/modules/quality/types/index.ts](../src/modules/quality/types/index.ts), and [src/modules/workflow/types/index.ts](../src/modules/workflow/types/index.ts).
+- Refactored [src/types/index.ts](../src/types/index.ts) from a monolithic 1,545 LOC file by removing redundant inline declarations and establishing clean re-export contracts.
+- Created public contract barrels [src/modules/manufacturing/index.ts](../src/modules/manufacturing/index.ts), [src/modules/inventory/index.ts](../src/modules/inventory/index.ts), [src/modules/quality/index.ts](../src/modules/quality/index.ts), and [src/modules/workflow/index.ts](../src/modules/workflow/index.ts).
+
 ### Verification
 - Targeted domain tests pass.
-- Full repository test suite passes (**76/76 tests passed**).
+- Full repository test suite passes (**77/77 tests passed**).
 - TypeScript compile and linter pass with 0 errors (`npm run lint`).
 - Production build succeeded (`npm run build`).
-
----
-
-## In progress / still to harden
-
-- Continue separating domain responsibilities from the legacy manufacturing orchestrator.
-- Formalize more backend application/service boundaries beyond procurement and workflow.
-- Expand repository abstraction for additional ERP collections as they become active transactional domains.
-- Move more domain logic from UI/state-heavy service orchestration into dedicated modules.
-- Increase coverage for high-risk ERP areas such as scheduling, capacity, and governance transitions.
-
----
-
-## Pending next logical steps
-
-1. Extract the remaining manufacturing execution logic still coupled to the legacy orchestrator into dedicated ERP domain modules.
-2. Continue backend/infrastructure decomposition around persistence, repository abstractions, and application-service boundaries.
-3. Maintain strict separation between ERP source-of-truth data and browser UI state; avoid placing authoritative ERP state in client-only storage.
-4. Keep authorization, approval, and governance checks enforced on the server side, with UI checks treated only as UX hints.
-5. Expand regression coverage for high-risk ERP domains such as capacity, scheduling, and workflow transitions.
-6. Keep the repository green by validating the relevant test, lint, and build checks after each boundary extraction.
 
 ---
 
@@ -146,4 +135,4 @@ The repository is being refactored incrementally toward a modular monolith with 
 npx tsx --test "src/**/*.test.ts" && npm run lint && npm run build
 ```
 
-Result: 76 tests passed, 0 failed; lint passed; build succeeded.
+Result: 77 tests passed, 0 failed; lint passed; build succeeded.
