@@ -166,7 +166,31 @@ import { evaluateGoodsReceipt } from '../../modules/procurement/goodsReceiptServ
 import { createWorkOrderRepository, type IWorkOrderRepository } from '../../modules/manufacturing/workOrderRepository';
 import { planWorkOrder, cancelWorkOrder } from '../../modules/manufacturing/workOrderService';
 import { createInventoryRepository, type IInventoryRepository } from '../../modules/inventory/inventoryRepository';
+import {
+  transferStockBetweenBuckets,
+  reverseStockMovement,
+  type BucketTransferInput,
+} from '../../modules/inventory/inventoryLedgerService';
 import { createQualityRepository, type IQualityRepository } from '../../modules/quality/qualityRepository';
+import { resolveNcr } from '../../modules/quality/qualityService';
+import {
+  buildEngineeringChangeRequest,
+  evaluateEcrApproval,
+  buildProductReleasePackageFromEcr,
+  applyEcrDecisionToOrder,
+  buildToolingItem,
+  buildEngineeringDrawing,
+  buildEngineeringSpecification,
+  buildWorkInstruction,
+  buildQcPlan,
+} from '../../modules/engineering';
+import {
+  buildNpiProject,
+  updateNpiMilestoneStatus,
+  processTrialRunRecord,
+  processPilotRunRecord,
+  buildProductReleasePackage,
+} from '../../modules/npi';
 
 // Authoritative Domain Repositories (Modular Monolith Persistence Seam)
 export const workOrderRepository: IWorkOrderRepository = createWorkOrderRepository();
@@ -1420,35 +1444,11 @@ export function useErpStore() {
   // ============================================================================
   const createNpiProject = useCallback(
     (projectData: Partial<NpiProject>) => {
-      const pNum = `NPI-2026-00${state.npiProjects.length + 1}`;
-      const newProject: NpiProject = {
-        id: `npi-${Date.now()}`,
-        projectNumber: pNum,
-        productId: projectData.productId || 'prd-abc-100',
-        productSku: projectData.productSku || 'ABC-100',
-        productName: projectData.productName || 'Smart Industrial Gateway Controller ABC-100',
-        productRevision: projectData.productRevision || 'Rev A',
-        customer: projectData.customer || 'Target Enterprise Customer',
-        projectOwner: projectData.projectOwner || state.currentUser.name,
-        engineeringOwner: projectData.engineeringOwner || 'Hendra Gunawan',
-        ppicRepresentative: projectData.ppicRepresentative || 'Dewi Lestari',
-        productionRepresentative: projectData.productionRepresentative || 'Agus Pratama',
-        qualityRepresentative: projectData.qualityRepresentative || 'Siti Nurhaliza',
-        toolingRepresentative: projectData.toolingRepresentative || 'Budi Santoso',
-        targetReleaseDate: projectData.targetReleaseDate || '2026-11-30',
-        status: (projectData.status as NpiStatus) || 'DEVELOPMENT',
-        priority: projectData.priority || 'HIGH',
-        notes: projectData.notes || 'New Product Introduction lifecycle project.',
-        blockingIssues: projectData.blockingIssues || [],
-        milestones: projectData.milestones || [
-          { id: 'ms-new-1', title: 'Conceptual Design & BOM Draft', targetDate: '2026-10-30', status: 'IN_PROGRESS', responsibleRole: 'Engineering' },
-          { id: 'ms-new-2', title: 'Tooling Qualification & First Article', targetDate: '2026-11-10', status: 'PENDING', responsibleRole: 'Tooling' },
-          { id: 'ms-new-3', title: 'Material Kitting & Trial Run', targetDate: '2026-11-18', status: 'PENDING', responsibleRole: 'PPIC' },
-          { id: 'ms-new-4', title: 'Pilot Run & Commercial Release Gate', targetDate: '2026-11-30', status: 'PENDING', responsibleRole: 'Quality & Operations' },
-        ],
-        trialRuns: [],
-        pilotRuns: [],
-      };
+      const newProject = buildNpiProject({
+        projectData,
+        existingCount: state.npiProjects.length,
+        currentUser: state.currentUser.name,
+      });
 
       setState((prev) => ({
         ...prev,
@@ -1475,23 +1475,9 @@ export function useErpStore() {
     (projectId: string, milestoneId: string, status: 'COMPLETED' | 'IN_PROGRESS' | 'PENDING') => {
       setState((prev) => ({
         ...prev,
-        npiProjects: prev.npiProjects.map((p) => {
-          if (p.id === projectId) {
-            return {
-              ...p,
-              milestones: p.milestones.map((m) =>
-                m.id === milestoneId
-                  ? {
-                      ...m,
-                      status,
-                      completedDate: status === 'COMPLETED' ? new Date().toISOString().split('T')[0] : m.completedDate,
-                    }
-                  : m
-              ),
-            };
-          }
-          return p;
-        }),
+        npiProjects: prev.npiProjects.map((p) =>
+          p.id === projectId ? updateNpiMilestoneStatus(p, milestoneId, status) : p
+        ),
       }));
       addNotification('info', `Milestone status updated to ${status}.`);
     },
@@ -1541,16 +1527,9 @@ export function useErpStore() {
     (trialData: NpiTrialRun) => {
       setState((prev) => ({
         ...prev,
-        npiProjects: prev.npiProjects.map((p) => {
-          if (p.id === trialData.npiProjectId) {
-            return {
-              ...p,
-              status: trialData.trialResult === 'PASS' || trialData.trialResult === 'PASS_WITH_ACTION' ? 'PILOT' : 'TRIAL',
-              trialRuns: [trialData, ...p.trialRuns],
-            };
-          }
-          return p;
-        }),
+        npiProjects: prev.npiProjects.map((p) =>
+          p.id === trialData.npiProjectId ? processTrialRunRecord(p, trialData) : p
+        ),
       }));
       addNotification('success', `Recorded Trial Run ${trialData.trialNumber}: Result ${trialData.trialResult}.`);
     },
@@ -1561,16 +1540,9 @@ export function useErpStore() {
     (pilotData: NpiPilotRun) => {
       setState((prev) => ({
         ...prev,
-        npiProjects: prev.npiProjects.map((p) => {
-          if (p.id === pilotData.npiProjectId) {
-            return {
-              ...p,
-              status: pilotData.pilotResult === 'PASS' ? 'READY_FOR_RELEASE' : p.status,
-              pilotRuns: [pilotData, ...p.pilotRuns],
-            };
-          }
-          return p;
-        }),
+        npiProjects: prev.npiProjects.map((p) =>
+          p.id === pilotData.npiProjectId ? processPilotRunRecord(p, pilotData) : p
+        ),
       }));
       addNotification('success', `Recorded Pilot Run ${pilotData.pilotNumber}: Result ${pilotData.pilotResult}. Project marked as READY FOR RELEASE.`);
     },
@@ -1580,73 +1552,31 @@ export function useErpStore() {
   // 28. PRODUCT RELEASE PACKAGE & OFFICIAL RELEASE GATE
   const createProductRelease = useCallback(
     (releaseData: Partial<ProductReleasePackage>) => {
-      const pkgNum = `REL-PKG-2026-${(state.productReleases.length + 1).toString().padStart(3, '0')}`;
-      const newPackage: ProductReleasePackage = {
-        id: `rel-${Date.now()}`,
-        packageNumber: pkgNum,
-        productId: releaseData.productId || 'prd-abc-100',
-        productSku: releaseData.productSku || 'ABC-100',
-        productName: releaseData.productName || 'Smart Industrial Gateway Controller ABC-100',
-        releasedRevision: releaseData.releasedRevision || 'Rev A',
-        drawingRevision: releaseData.drawingRevision || 'DWG-ABC-100-A Rev A',
-        specificationRevision: releaseData.specificationRevision || 'SPEC-ABC-100-A Rev A',
-        bomRevision: releaseData.bomRevision || 'BOM-001 Rev.01',
-        routingRevision: releaseData.routingRevision || 'RT-001 Rev.01',
-        toolingRevision: releaseData.toolingRevision || 'TOOL-MOLD-GW01 Rev 01',
-        wiRevision: releaseData.wiRevision || 'WI-ABC-100-OP10 Rev A',
-        qcPlanRevision: releaseData.qcPlanRevision || 'QCP-ABC-100-A Rev A',
-        effectiveDate: releaseData.effectiveDate || new Date().toISOString().split('T')[0],
-        releasedBy: state.currentUser.name,
-        status: 'ACTIVE',
-        notes: releaseData.notes || 'Formal manufacturing baseline package release.',
-        approvals: [
-          { role: 'VP Engineering', approver: 'Ir. Agus Wijaya', approvedAt: new Date().toISOString().replace('T', ' ').slice(0, 16), status: 'APPROVED' },
-          { role: 'Quality Assurance Director', approver: 'Siti Nurhaliza', approvedAt: new Date().toISOString().replace('T', ' ').slice(0, 16), status: 'APPROVED' },
-          { role: 'Production GM', approver: state.currentUser.name, approvedAt: new Date().toISOString().replace('T', ' ').slice(0, 16), status: 'APPROVED' },
-          { role: 'PPIC Operations Lead', approver: 'Dewi Lestari', approvedAt: new Date().toISOString().replace('T', ' ').slice(0, 16), status: 'APPROVED' },
-        ],
-      };
-
-      // Set product lifecycle to RELEASED
+      let createdPackage: ProductReleasePackage | null = null;
       setState((prev) => {
-        const updatedProducts = prev.products.map((prod) => {
-          if (prod.id === newPackage.productId || prod.sku === newPackage.productSku) {
-            return {
-              ...prod,
-              lifecycleStatus: 'RELEASED' as const,
-              currentRevision: newPackage.releasedRevision,
-              effectiveDate: newPackage.effectiveDate,
-            };
-          }
-          return prod;
-        });
-
-        const audit: AuditLogEntry = {
-          id: `aud-${Date.now()}`,
-          documentId: newPackage.packageNumber,
-          documentType: 'PRODUCT_RELEASE',
-          action: 'RELEASE_PRODUCT',
-          actor: state.currentUser.name,
-          role: state.currentUser.role,
-          timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
-          oldStatus: 'PILOT',
-          newStatus: 'RELEASED',
-          decision: 'APPROVED',
-          reason: `Approved official manufacturing baseline release package ${newPackage.packageNumber} for ${newPackage.productSku} ${newPackage.releasedRevision}. Product is now authorized for commercial volume production.`,
-        };
+        const { releasePackage, updatedProducts, auditLog } = buildProductReleasePackage(
+          releaseData,
+          prev.productReleases.length + 1,
+          prev.products,
+          state.currentUser.name,
+          state.currentUser.role
+        );
+        createdPackage = releasePackage;
 
         return {
           ...prev,
-          productReleases: [newPackage, ...prev.productReleases],
+          productReleases: [releasePackage, ...prev.productReleases],
           products: updatedProducts,
-          auditLogs: [audit, ...prev.auditLogs],
+          auditLogs: [auditLog, ...prev.auditLogs],
         };
       });
 
-      addNotification('success', `Product ${newPackage.productSku} is officially RELEASED for commercial manufacturing (Package: ${newPackage.packageNumber}).`);
-      return newPackage;
+      if (createdPackage) {
+        addNotification('success', `Product ${(createdPackage as ProductReleasePackage).productSku} is officially RELEASED for commercial manufacturing (Package: ${(createdPackage as ProductReleasePackage).packageNumber}).`);
+      }
+      return createdPackage;
     },
-    [state.productReleases.length, state.currentUser, addNotification]
+    [state.currentUser, addNotification]
   );
 
   // 29. MATERIAL REQUEST & PHYSICAL LINE DELIVERY LEDGER
@@ -1709,6 +1639,10 @@ export function useErpStore() {
         return;
       }
 
+      evaluation.stockMovements.forEach((movement) => {
+        inventoryRepository.recordMovement(movement);
+      });
+
       setState((prev) => ({
         ...prev,
         stockMovements: [...evaluation.stockMovements, ...prev.stockMovements],
@@ -1724,50 +1658,12 @@ export function useErpStore() {
   // 30. ENGINEERING CHANGE MANAGEMENT (ECR / ECO)
   const createEngineeringChangeRequest = useCallback(
     (ecrData: Partial<EngineeringChangeRequest>) => {
-      const ecrNum = `ECR-2026-${(state.engineeringChanges.length + 5).toString().padStart(6, '0')}`;
-      const newEcr: EngineeringChangeRequest = {
-        id: `ecr-${Date.now()}`,
-        ecrNumber: ecrNum,
-        productId: ecrData.productId || 'prd-001',
-        productSku: ecrData.productSku || 'Product A',
-        productName: ecrData.productName || 'Industrial Motor Controller (Product A)',
-        currentRevision: ecrData.currentRevision || 'Rev A',
-        proposedRevision: ecrData.proposedRevision || 'Rev B',
-        reason: ecrData.reason || 'Engineering specification update.',
-        requestedBy: ecrData.requestedBy || state.currentUser.name,
-        department: ecrData.department || 'Engineering',
-        priority: ecrData.priority || 'HIGH',
-        status: 'IMPACT_ANALYSIS',
-        targetEffectiveDate: ecrData.targetEffectiveDate || new Date().toISOString().split('T')[0],
-        createdAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
-        impactAnalysis: ecrData.impactAnalysis || {
-          bomImpact: true,
-          routingImpact: true,
-          wiImpact: true,
-          qcImpact: true,
-          toolingImpact: false,
-          costImpact: true,
-          customerApprovalRequired: false,
-          estimatedCostDifference: 0,
-          affectedOpenWorkOrderIds: state.productionOrders.filter((o) => o.status === 'RELEASED' || o.status === 'PLANNED').map((o) => o.id),
-          inventoryOldMaterialRemaining: [],
-          inventoryNewMaterialRequired: [],
-          impactSummary: 'Analysis pending review.',
-        },
-        openWorkOrderDecisions: state.productionOrders.map((o) => ({
-          workOrderId: o.id,
-          orderNumber: o.orderNumber,
-          productSku: o.productSku,
-          currentRevision: o.bomRevision || 'Rev A',
-          progressPercentage: o.status === 'IN_PROGRESS' ? 50 : 0,
-          decision: o.status === 'IN_PROGRESS' ? 'CONTINUE_EXISTING_REV' : 'APPLY_NEW_REV',
-        })),
-        approvals: [
-          { role: 'Engineering Lead', approver: 'Hendra Gunawan', status: 'PENDING' },
-          { role: 'Quality Assurance', approver: 'Siti Nurhaliza', status: 'PENDING' },
-          { role: 'Operations Director', approver: 'Ir. Agus Wijaya', status: 'PENDING' },
-        ],
-      };
+      const newEcr = buildEngineeringChangeRequest({
+        ecrData,
+        existingCount: state.engineeringChanges.length,
+        productionOrders: state.productionOrders,
+        currentUser: state.currentUser.name,
+      });
 
       setState((prev) => ({
         ...prev,
@@ -1813,17 +1709,8 @@ export function useErpStore() {
         ...prev,
         engineeringChanges: prev.engineeringChanges.map((ecr) => {
           if (ecr.id === ecrId) {
-            const updatedApprovals = ecr.approvals.map((app) =>
-              app.role === role
-                ? { ...app, approver, status: 'APPROVED' as const, approvedAt: new Date().toISOString().replace('T', ' ').slice(0, 16) }
-                : app
-            );
-            const allApproved = updatedApprovals.every((a) => a.status === 'APPROVED');
-            return {
-              ...ecr,
-              approvals: updatedApprovals,
-              status: allApproved ? ('APPROVED' as const) : ecr.status,
-            };
+            const { updatedEcr } = evaluateEcrApproval(ecr, role, approver);
+            return updatedEcr;
           }
           return ecr;
         }),
@@ -1838,32 +1725,13 @@ export function useErpStore() {
       const ecr = state.engineeringChanges.find((e) => e.id === ecrId);
       if (!ecr) return;
 
-      const timeStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
-
-      // Create new Release Package for the proposed revision
-      const newReleasePkg: ProductReleasePackage = {
-        id: `rel-${Date.now()}-ecr`,
-        packageNumber: `REL-PKG-2026-${(state.productReleases.length + 1).toString().padStart(3, '0')}`,
-        productId: ecr.productId,
-        productSku: ecr.productSku,
-        productName: ecr.productName,
-        releasedRevision: ecr.proposedRevision,
-        drawingRevision: `${ecr.productSku} Drawing ${ecr.proposedRevision}`,
-        specificationRevision: `${ecr.productSku} Spec ${ecr.proposedRevision}`,
-        bomRevision: `${ecr.productSku} BOM ${ecr.proposedRevision}`,
-        routingRevision: `${ecr.productSku} Routing ${ecr.proposedRevision}`,
-        toolingRevision: 'Standard Tooling Rev',
-        wiRevision: `${ecr.productSku} WI ${ecr.proposedRevision}`,
-        qcPlanRevision: `${ecr.productSku} QCP ${ecr.proposedRevision}`,
+      const { updatedEcr, releasePackage, auditLog } = buildProductReleasePackageFromEcr(
+        ecr,
+        state.productReleases.length + 1,
         effectiveDate,
-        releasedBy: state.currentUser.name,
-        status: 'ACTIVE',
-        notes: `Released via ${ecr.ecrNumber}: ${ecr.reason}`,
-        approvals: [
-          { role: 'Engineering Lead', approver: state.currentUser.name, approvedAt: timeStr, status: 'APPROVED' },
-          { role: 'Operations Director', approver: 'Ir. Agus Wijaya', approvedAt: timeStr, status: 'APPROVED' },
-        ],
-      };
+        state.currentUser.name,
+        state.currentUser.role
+      );
 
       // Mark older release packages for this product as SUPERSEDED
       const updatedReleases = state.productReleases.map((pkg) =>
@@ -1887,48 +1755,16 @@ export function useErpStore() {
       const updatedProductionOrders = state.productionOrders.map((order) => {
         const decisionObj = ecr.openWorkOrderDecisions.find((d) => d.workOrderId === order.id);
         if (!decisionObj) return order;
-
-        if (decisionObj.decision === 'APPLY_NEW_REV') {
-          return {
-            ...order,
-            productRevision: ecr.proposedRevision,
-            bomRevision: `${ecr.productSku} BOM ${ecr.proposedRevision}`,
-            routingRevision: `${ecr.productSku} Routing ${ecr.proposedRevision}`,
-          };
-        }
-        if (decisionObj.decision === 'HOLD_WORK_ORDER') {
-          return {
-            ...order,
-            status: 'PLANNED' as const, // Or held
-          };
-        }
-        // If CONTINUE_EXISTING_REV: remains untouched!
-        return order;
+        return applyEcrDecisionToOrder(order, decisionObj.decision, ecr.proposedRevision, ecr.productSku);
       });
-
-      const audit: AuditLogEntry = {
-        id: `aud-${Date.now()}`,
-        documentId: ecr.ecrNumber,
-        documentType: 'ENGINEERING_CHANGE',
-        action: 'RELEASE_ECR_REVISION',
-        actor: state.currentUser.name,
-        role: state.currentUser.role,
-        timestamp: timeStr,
-        oldStatus: ecr.status,
-        newStatus: 'EFFECTIVE',
-        decision: 'EXECUTED',
-        reason: `Engineering Change ${ecr.ecrNumber} made EFFECTIVE. Created baseline ${newReleasePkg.packageNumber} (${ecr.proposedRevision}). Open orders updated per authorized decisions without retroactive data corruption.`,
-      };
 
       setState((prev) => ({
         ...prev,
-        engineeringChanges: prev.engineeringChanges.map((e) =>
-          e.id === ecrId ? { ...e, status: 'EFFECTIVE' as const, effectiveAt: timeStr, releasedPackageId: newReleasePkg.id } : e
-        ),
-        productReleases: [newReleasePkg, ...updatedReleases],
+        engineeringChanges: prev.engineeringChanges.map((e) => (e.id === ecrId ? updatedEcr : e)),
+        productReleases: [releasePackage, ...updatedReleases],
         products: updatedProducts,
         productionOrders: updatedProductionOrders,
-        auditLogs: [audit, ...prev.auditLogs],
+        auditLogs: [auditLog, ...prev.auditLogs],
       }));
 
       addNotification('success', `ECR ${ecr.ecrNumber} released! New revision ${ecr.proposedRevision} is now EFFECTIVE as of ${effectiveDate}.`);
@@ -1939,24 +1775,7 @@ export function useErpStore() {
   // 31. TOOLING, WI, QC PLAN & DRAWING ACTIONS
   const createToolingItem = useCallback(
     (toolData: Partial<ToolingItem>) => {
-      const newTool: ToolingItem = {
-        id: `tool-${Date.now()}`,
-        toolId: toolData.toolId || `TOOL-${Date.now().toString().slice(-4)}`,
-        name: toolData.name || 'New Tooling Item',
-        type: toolData.type || 'MOLD',
-        productId: toolData.productId || 'prd-abc-100',
-        productSku: toolData.productSku || 'ABC-100',
-        revision: toolData.revision || 'Rev 01',
-        status: toolData.status || 'READY',
-        location: toolData.location || 'Tool Crib Bay 1',
-        owner: toolData.owner || 'Tooling Section',
-        capacityPerShift: toolData.capacityPerShift || 1000,
-        expectedLifeShots: toolData.expectedLifeShots || 100000,
-        currentShots: toolData.currentShots || 0,
-        maintenanceIntervalShots: toolData.maintenanceIntervalShots || 10000,
-        notes: toolData.notes,
-      };
-
+      const newTool = buildToolingItem(toolData);
       setState((prev) => ({
         ...prev,
         toolingItems: [newTool, ...prev.toolingItems],
@@ -1980,23 +1799,7 @@ export function useErpStore() {
 
   const createEngineeringDrawing = useCallback(
     (drawing: Partial<EngineeringDrawing>) => {
-      const newDwg: EngineeringDrawing = {
-        id: `dwg-${Date.now()}`,
-        drawingNumber: drawing.drawingNumber || `DWG-${Date.now().toString().slice(-4)}`,
-        revision: drawing.revision || 'Rev A',
-        productId: drawing.productId || 'prd-abc-100',
-        productSku: drawing.productSku || 'ABC-100',
-        title: drawing.title || 'Technical CAD Blueprint',
-        fileReference: drawing.fileReference || 'model.step',
-        cadModelType: drawing.cadModelType || '3D_STEP',
-        description: drawing.description || 'Master blueprint reference.',
-        status: drawing.status || 'RELEASED',
-        createdBy: state.currentUser.name,
-        createdDate: new Date().toISOString().split('T')[0],
-        approvedBy: state.currentUser.name,
-        approvalDate: new Date().toISOString().split('T')[0],
-        effectiveDate: new Date().toISOString().split('T')[0],
-      };
+      const newDwg = buildEngineeringDrawing(drawing, state.currentUser.name);
       setState((prev) => ({
         ...prev,
         drawings: [newDwg, ...prev.drawings],
@@ -2029,19 +1832,7 @@ export function useErpStore() {
 
   const createEngineeringSpecification = useCallback(
     (spec: Partial<EngineeringSpecification>) => {
-      const newSpec: EngineeringSpecification = {
-        id: `spec-${Date.now()}`,
-        specNumber: spec.specNumber || `SPEC-${Date.now().toString().slice(-4)}`,
-        revision: spec.revision || 'Rev A',
-        productId: spec.productId || 'prd-abc-100',
-        productSku: spec.productSku || 'ABC-100',
-        title: spec.title || 'Engineering Specification',
-        content: spec.content || 'Technical performance criteria.',
-        criticalParameters: spec.criticalParameters || [],
-        status: spec.status || 'RELEASED',
-        approvedBy: state.currentUser.name,
-        effectiveDate: new Date().toISOString().split('T')[0],
-      };
+      const newSpec = buildEngineeringSpecification(spec, state.currentUser.name);
       setState((prev) => ({
         ...prev,
         specifications: [newSpec, ...prev.specifications],
@@ -2067,28 +1858,7 @@ export function useErpStore() {
 
   const createWorkInstruction = useCallback(
     (wi: Partial<WorkInstruction>) => {
-      const newWi: WorkInstruction = {
-        id: `wi-${Date.now()}`,
-        wiNumber: wi.wiNumber || `WI-${Date.now().toString().slice(-4)}`,
-        revision: wi.revision || 'Rev A',
-        productId: wi.productId || 'prd-abc-100',
-        productSku: wi.productSku || 'ABC-100',
-        productRevision: wi.productRevision || 'Rev A',
-        operationSeq: wi.operationSeq || 10,
-        operationName: wi.operationName || 'Assembly Operation',
-        workCenterId: wi.workCenterId || 'wc-01',
-        workCenterName: wi.workCenterName || 'High Precision Work Center',
-        title: wi.title || 'Standard Operating Procedure',
-        instructions: wi.instructions || ['Step 1: Check components', 'Step 2: Assemble'],
-        safetyNotes: wi.safetyNotes || ['Wear safety goggles'],
-        qualityCheckpoints: wi.qualityCheckpoints || ['Verify dimensions'],
-        requiredTools: wi.requiredTools || ['Torque Wrench'],
-        requiredMaterials: wi.requiredMaterials || ['Raw Materials'],
-        status: wi.status || 'RELEASED',
-        approvedBy: state.currentUser.name,
-        approvalDate: new Date().toISOString().split('T')[0],
-        effectiveDate: new Date().toISOString().split('T')[0],
-      };
+      const newWi = buildWorkInstruction(wi, state.currentUser.name);
       setState((prev) => ({
         ...prev,
         workInstructions: [newWi, ...prev.workInstructions],
@@ -2114,20 +1884,7 @@ export function useErpStore() {
 
   const createQcPlan = useCallback(
     (plan: Partial<QcPlan>) => {
-      const newPlan: QcPlan = {
-        id: `qcp-${Date.now()}`,
-        planNumber: plan.planNumber || `QCP-${Date.now().toString().slice(-4)}`,
-        revision: plan.revision || 'Rev A',
-        productId: plan.productId || 'prd-abc-100',
-        productSku: plan.productSku || 'ABC-100',
-        productRevision: plan.productRevision || 'Rev A',
-        operationSeq: plan.operationSeq || 10,
-        operationName: plan.operationName || 'Final Inspection',
-        status: plan.status || 'RELEASED',
-        characteristics: plan.characteristics || [],
-        approvedBy: state.currentUser.name,
-        effectiveDate: new Date().toISOString().split('T')[0],
-      };
+      const newPlan = buildQcPlan(plan, state.currentUser.name);
       setState((prev) => ({
         ...prev,
         qcPlans: [newPlan, ...prev.qcPlans],
@@ -2428,6 +2185,110 @@ export function useErpStore() {
     [addNotification]
   );
 
+  // 35. Inventory 5-Bucket Transfer & Compensating Reversals
+  const transferStockBetweenBucketsHandler = useCallback(
+    (input: BucketTransferInput) => {
+      const result = transferStockBetweenBuckets(input, state.stockMovements);
+      if (!result.success || !result.movement || !result.auditLog) {
+        addNotification('error', result.reason || 'Bucket transfer rejected.');
+        return { success: false, reason: result.reason };
+      }
+      inventoryRepository.recordMovement(result.movement);
+      setState((prev) => ({
+        ...prev,
+        stockMovements: [result.movement!, ...prev.stockMovements],
+        auditLogs: [result.auditLog!, ...prev.auditLogs],
+      }));
+      addNotification('success', result.reason || `Transferred ${input.quantity} of ${input.sku} to ${input.toBucket}.`);
+      return { success: true, movement: result.movement };
+    },
+    [state.stockMovements, addNotification]
+  );
+
+  const reverseStockMovementHandler = useCallback(
+    (movementId: string, reversalReason: string) => {
+      const original = state.stockMovements.find((m) => m.id === movementId);
+      if (!original) {
+        addNotification('error', 'Original stock movement not found.');
+        return { success: false, reason: 'Movement not found' };
+      }
+      const result = reverseStockMovement(
+        original,
+        state.currentUser.name,
+        state.currentUser.role,
+        reversalReason
+      );
+      if (!result.success || !result.reversalMovement || !result.auditLog) {
+        addNotification('error', result.reason || 'Reversal rejected.');
+        return { success: false, reason: result.reason };
+      }
+      inventoryRepository.recordMovement(result.reversalMovement);
+      setState((prev) => ({
+        ...prev,
+        stockMovements: [
+          result.reversalMovement!,
+          ...prev.stockMovements.map((m) =>
+            m.id === movementId
+              ? {
+                  ...m,
+                  isReversed: true,
+                  reversedAt: result.reversalMovement!.timestamp,
+                  reversalReason,
+                }
+              : m
+          ),
+        ],
+        auditLogs: [result.auditLog!, ...prev.auditLogs],
+      }));
+      addNotification('success', `Compensating reversal posted: ${result.reversalMovement.movementNo}.`);
+      return { success: true, reversalMovement: result.reversalMovement };
+    },
+    [state.stockMovements, state.currentUser, addNotification]
+  );
+
+  // 36. Quality NCR Resolution
+  const resolveNcrHandler = useCallback(
+    (
+      ncrId: string,
+      disposition: 'SCRAP' | 'REWORK' | 'USE_AS_IS',
+      rootCause: string
+    ) => {
+      const ncr = state.ncrs.find((n) => n.id === ncrId);
+      if (!ncr) {
+        addNotification('error', 'NCR not found.');
+        return { success: false, error: 'NCR not found' };
+      }
+      try {
+        const result = resolveNcr({
+          ncr,
+          disposition,
+          rootCause,
+          resolver: state.currentUser.name,
+        });
+
+        result.stockMovements.forEach((movement) => {
+          inventoryRepository.recordMovement(movement);
+        });
+        qualityRepository.saveNcr(result.resolvedNcr);
+
+        setState((prev) => ({
+          ...prev,
+          ncrs: prev.ncrs.map((n) => (n.id === ncrId ? result.resolvedNcr : n)),
+          stockMovements: [...result.stockMovements, ...prev.stockMovements],
+          auditLogs: [result.auditLog, ...prev.auditLogs],
+        }));
+
+        addNotification('success', `NCR ${ncr.ncrNo} resolved with disposition ${disposition}.`);
+        return { success: true, resolvedNcr: result.resolvedNcr };
+      } catch (err: any) {
+        const msg = err?.message || 'Failed to resolve NCR.';
+        addNotification('error', msg);
+        return { success: false, error: msg };
+      }
+    },
+    [state.ncrs, state.currentUser, addNotification]
+  );
+
   // Reset to initial baseline
   const resetDemoState = useCallback(() => {
     localStorage.removeItem(LEGACY_ERP_STORAGE_KEY);
@@ -2515,6 +2376,9 @@ export function useErpStore() {
     updateChangeoverRule,
     planWorkOrderById,
     cancelWorkOrderById,
+    transferStockBetweenBuckets: transferStockBetweenBucketsHandler,
+    reverseStockMovement: reverseStockMovementHandler,
+    resolveNcr: resolveNcrHandler,
   };
 }
 

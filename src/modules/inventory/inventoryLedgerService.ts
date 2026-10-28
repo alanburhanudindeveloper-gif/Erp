@@ -246,13 +246,14 @@ export function reverseStockMovement(
     sourceDocument: originalMovement.movementNo,
     movementType: 'REVERSAL',
     stockBucket: originalMovement.stockBucket === 'HOLD' ? 'AVAILABLE' : originalMovement.stockBucket,
+    isReversed: true,
   };
 
   const auditLog: AuditLogEntry = {
     id: `aud-${Date.now()}`,
     documentId: reversalNo,
     documentType: 'STOCK_MOVEMENT',
-    action: 'REVERSE_STOCK_MOVEMENT',
+    action: 'REVERSE_MOVEMENT',
     actor,
     role,
     timestamp: timeStr,

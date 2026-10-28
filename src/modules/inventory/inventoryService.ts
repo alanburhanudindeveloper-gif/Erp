@@ -1,4 +1,5 @@
 import type { AuditLogEntry, MaterialReservation, Product, ProductionOrder, StockMovement } from '../../types';
+import { reverseStockMovement as reverseStockMovementInLedger } from './inventoryLedgerService';
 
 export type InventoryHealthStatus = 'HEALTHY' | 'BELOW_BUFFER' | 'CRITICAL';
 
@@ -348,46 +349,14 @@ export function recordScrapTransaction(
 export function reverseStockMovement(
   movement: StockMovement,
   actor: string,
-  role: string = 'Controller'
+  role: string = 'Controller',
+  reason: string = 'Compensating reversal created for stock movement'
 ): ReversalDecision {
-  if (movement.movementType === 'REVERSAL') {
-    return {
-      allowed: false,
-      reason: `Movement ${movement.movementNo} is already reversed.`,
-    };
-  }
-
-  const now = new Date();
-  const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-
-  const reversal: StockMovement = {
-    ...movement,
-    id: `mov-${Date.now()}-rev`,
-    movementNo: `MATDOC-REV-${Date.now().toString().slice(-5)}`,
-    timestamp: timeStr,
-    fromLocation: movement.toLocation,
-    toLocation: movement.fromLocation,
-    movementType: 'REVERSAL',
-    stockBucket: movement.stockBucket,
-    isReversed: true,
-  };
-
-  const auditLog: AuditLogEntry = {
-    id: `aud-${Date.now()}`,
-    documentId: movement.sourceDocument,
-    documentType: 'STOCK_MOVEMENT',
-    action: 'REVERSE_MOVEMENT',
-    actor,
-    role,
-    timestamp: timeStr,
-    decision: 'EXECUTED',
-    reason: `Compensating reversal created for stock movement ${movement.movementNo}.`,
-  };
-
+  const result = reverseStockMovementInLedger(movement, actor, role, reason);
   return {
-    allowed: true,
-    reason: `Reversal created for ${movement.movementNo}.`,
-    movement: reversal,
-    auditLog,
+    allowed: result.success,
+    reason: result.reason,
+    movement: result.reversalMovement,
+    auditLog: result.auditLog,
   };
 }

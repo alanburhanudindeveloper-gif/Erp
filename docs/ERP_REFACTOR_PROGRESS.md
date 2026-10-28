@@ -116,16 +116,41 @@ The repository is being refactored incrementally toward a modular monolith with 
 - Replaced inline maps and global counters in `server.ts` with calls to `aiTelemetryService`.
 - Regression suite in [src/infrastructure/ai/aiTelemetryService.test.ts](../src/infrastructure/ai/aiTelemetryService.test.ts).
 
-### Domain-Owned Types Decoupling
+### Domain-Owned Types Decoupling & Module Barrels
 - Extracted domain-specific types into [src/modules/manufacturing/types/index.ts](../src/modules/manufacturing/types/index.ts), [src/modules/inventory/types/index.ts](../src/modules/inventory/types/index.ts), [src/modules/quality/types/index.ts](../src/modules/quality/types/index.ts), and [src/modules/workflow/types/index.ts](../src/modules/workflow/types/index.ts).
 - Refactored [src/types/index.ts](../src/types/index.ts) from a monolithic 1,545 LOC file by removing redundant inline declarations and establishing clean re-export contracts.
-- Created public contract barrels [src/modules/manufacturing/index.ts](../src/modules/manufacturing/index.ts), [src/modules/inventory/index.ts](../src/modules/inventory/index.ts), [src/modules/quality/index.ts](../src/modules/quality/index.ts), and [src/modules/workflow/index.ts](../src/modules/workflow/index.ts).
+- Created public contract barrels:
+  - [src/modules/manufacturing/index.ts](../src/modules/manufacturing/index.ts)
+  - [src/modules/inventory/index.ts](../src/modules/inventory/index.ts)
+  - [src/modules/quality/index.ts](../src/modules/quality/index.ts)
+  - [src/modules/workflow/index.ts](../src/modules/workflow/index.ts)
+  - [src/modules/procurement/index.ts](../src/modules/procurement/index.ts)
+  - [src/modules/planning/index.ts](../src/modules/planning/index.ts)
+  - [src/modules/scheduling/index.ts](../src/modules/scheduling/index.ts)
+  - [src/modules/engineering/index.ts](../src/modules/engineering/index.ts)
+  - [src/modules/npi/index.ts](../src/modules/npi/index.ts)
+
+### Engineering Domain Extraction (ECR / ECO & Technical Documents)
+- Extracted Engineering Change Request lifecycle (`buildEngineeringChangeRequest`, `evaluateEcrApproval`, `buildProductReleasePackageFromEcr`, `applyEcrDecisionToOrder`) into [src/modules/engineering/engineeringService.ts](../src/modules/engineering/engineeringService.ts).
+- Extracted factory builders for Tooling, Engineering Drawings, Specifications, Work Instructions, and QC Plans.
+- Added comprehensive unit test suite in [src/modules/engineering/engineeringService.test.ts](../src/modules/engineering/engineeringService.test.ts) (5 tests passing).
+- Rewired `manufacturingService.ts` to delegate ECR/ECO and technical document creation to `engineeringService`.
+
+### NPI Domain Extraction (Product Introduction & Commercial Release Gate)
+- Extracted NPI project construction, milestone progression (`updateNpiMilestoneStatus`), trial runs (`processTrialRunRecord`), pilot runs (`processPilotRunRecord`), and official commercial release package generation (`buildProductReleasePackage`) into [src/modules/npi/npiService.ts](../src/modules/npi/npiService.ts).
+- Added comprehensive unit test suite in [src/modules/npi/npiService.test.ts](../src/modules/npi/npiService.test.ts) (5 tests passing).
+- Rewired `manufacturingService.ts` to delegate all NPI lifecycle operations to `npiService`.
+
+### Inventory & Quality Domain Persistence Seams
+- Synchronized `deliverMaterialRequestToLine` with `inventoryRepository.recordMovement()`.
+- Wired atomic bucket transfers (`transferStockBetweenBuckets`) and immutable compensating reversals (`reverseStockMovement`) into `useErpStore` facade with repository synchronization.
+- Wired Non-Conformance Report resolution (`resolveNcr`) with mandatory root-cause analysis and automatic compensating inventory movements (`HOLD` $\rightarrow$ `AVAILABLE` / `REJECTED`) into `useErpStore` facade backed by `qualityRepository` and `inventoryRepository`.
 
 ### Verification
 - Targeted domain tests pass.
-- Full repository test suite passes (**77/77 tests passed**).
+- Full repository test suite passes (**87/87 tests passed**).
 - TypeScript compile and linter pass with 0 errors (`npm run lint`).
-- Production build succeeded (`npm run build`).
+- Production build succeeded (`npm run build` in 1.50s).
 
 ---
 
@@ -135,4 +160,4 @@ The repository is being refactored incrementally toward a modular monolith with 
 npx tsx --test "src/**/*.test.ts" && npm run lint && npm run build
 ```
 
-Result: 77 tests passed, 0 failed; lint passed; build succeeded.
+Result: 87 tests passed, 0 failed; lint passed (0 errors); build succeeded (1.50s).
