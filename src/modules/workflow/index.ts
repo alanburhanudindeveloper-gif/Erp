@@ -3,3 +3,4 @@
 export * from './types';
 export * from './workflowMatrixService';
 export * from './workflowService';
+export * from './workflowRepository';

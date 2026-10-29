@@ -191,11 +191,29 @@ import {
   processPilotRunRecord,
   buildProductReleasePackage,
 } from '../../modules/npi';
+import { createProcurementRepository, type IProcurementRepository } from '../../modules/procurement';
+import { createPlanningRepository, type IPlanningRepository } from '../../modules/planning';
+import { createSchedulingRepository, type ISchedulingRepository } from '../../modules/scheduling';
+import { createEngineeringRepository, type IEngineeringRepository } from '../../modules/engineering';
+import { createNpiRepository, type INpiRepository } from '../../modules/npi';
+import { createMaintenanceRepository, type IMaintenanceRepository } from '../../modules/maintenance';
+import { createCostingRepository, type ICostingRepository } from '../../modules/costing';
+import { createMasterDataRepository, type IMasterDataRepository } from '../../modules/master-data';
+import { createWorkflowRepository, type IWorkflowRepository } from '../../modules/workflow';
 
 // Authoritative Domain Repositories (Modular Monolith Persistence Seam)
 export const workOrderRepository: IWorkOrderRepository = createWorkOrderRepository();
 export const inventoryRepository: IInventoryRepository = createInventoryRepository();
 export const qualityRepository: IQualityRepository = createQualityRepository();
+export const procurementRepository: IProcurementRepository = createProcurementRepository();
+export const planningRepository: IPlanningRepository = createPlanningRepository();
+export const schedulingRepository: ISchedulingRepository = createSchedulingRepository();
+export const engineeringRepository: IEngineeringRepository = createEngineeringRepository();
+export const npiRepository: INpiRepository = createNpiRepository();
+export const maintenanceRepository: IMaintenanceRepository = createMaintenanceRepository();
+export const costingRepository: ICostingRepository = createCostingRepository();
+export const masterDataRepository: IMasterDataRepository = createMasterDataRepository();
+export const workflowRepository: IWorkflowRepository = createWorkflowRepository();
 
 export interface ErpState {
   products: Product[];

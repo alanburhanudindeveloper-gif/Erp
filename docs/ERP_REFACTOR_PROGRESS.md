@@ -147,10 +147,53 @@ The repository is being refactored incrementally toward a modular monolith with 
 - Wired Non-Conformance Report resolution (`resolveNcr`) with mandatory root-cause analysis and automatic compensating inventory movements (`HOLD` $\rightarrow$ `AVAILABLE` / `REJECTED`) into `useErpStore` facade backed by `qualityRepository` and `inventoryRepository`.
 
 ### Verification
+### Shared Kernel Foundation
+- Created [src/shared/kernel/result.ts](../src/shared/kernel/result.ts) (`Result<T, E>`, `ok`, `fail`, `unwrap`, `isOk`, `isFail`).
+- Created [src/shared/kernel/errors.ts](../src/shared/kernel/errors.ts) (`DomainError`, `ValidationError`, `NotFoundError`, `ConflictError`, `AuthorizationError`, `InvariantViolationError`).
+- Created [src/shared/kernel/pagination.ts](../src/shared/kernel/pagination.ts) (`PaginationQuery`, `PaginatedResult`, `paginateItems`).
+- Created [src/shared/kernel/index.ts](../src/shared/kernel/index.ts) barrel.
+- Added test coverage in [src/shared/kernel/result.test.ts](../src/shared/kernel/result.test.ts) (3 tests passing).
+
+### Authoritative Domain Repositories Across All Modules
+- Created authoritative repositories backed by `ErpCollectionRepository` and `persistencePolicy`:
+  - **Procurement**: [src/modules/procurement/procurementRepository.ts](../src/modules/procurement/procurementRepository.ts) (PR, PO, GRN) & [procurementRepository.test.ts](../src/modules/procurement/procurementRepository.test.ts)
+  - **Planning**: [src/modules/planning/planningRepository.ts](../src/modules/planning/planningRepository.ts) (Production Plans, Demands, MPS) & [planningRepository.test.ts](../src/modules/planning/planningRepository.test.ts)
+  - **Scheduling**: [src/modules/scheduling/schedulingRepository.ts](../src/modules/scheduling/schedulingRepository.ts) (Finite Scheduled Slots, What-If Scenarios) & [schedulingRepository.test.ts](../src/modules/scheduling/schedulingRepository.test.ts)
+  - **Engineering**: [src/modules/engineering/engineeringRepository.ts](../src/modules/engineering/engineeringRepository.ts) (ECR, Drawings, Specs, Tooling, WI, QC Plans, Release Packages) & [engineeringRepository.test.ts](../src/modules/engineering/engineeringRepository.test.ts)
+  - **NPI**: [src/modules/npi/npiRepository.ts](../src/modules/npi/npiRepository.ts) (NPI Projects) & [npiRepository.test.ts](../src/modules/npi/npiRepository.test.ts)
+  - **Maintenance**: [src/modules/maintenance/maintenanceRepository.ts](../src/modules/maintenance/maintenanceRepository.ts) (Machines, Downtime Events) & [maintenanceRepository.test.ts](../src/modules/maintenance/maintenanceRepository.test.ts)
+  - **Costing**: [src/modules/costing/costingRepository.ts](../src/modules/costing/costingRepository.ts) (Cost Variances) & [costingRepository.test.ts](../src/modules/costing/costingRepository.test.ts)
+  - **Master Data**: [src/modules/master-data/masterDataRepository.ts](../src/modules/master-data/masterDataRepository.ts) (Products, BOMs, Routings, Work Centers, Suppliers) & [masterDataRepository.test.ts](../src/modules/master-data/masterDataRepository.test.ts)
+  - **Workflow**: [src/modules/workflow/workflowRepository.ts](../src/modules/workflow/workflowRepository.ts) (Workflows, Business Rules, Approval Requests) & [workflowRepository.test.ts](../src/modules/workflow/workflowRepository.test.ts)
+- Registered all modular repositories in the persistence seam in [src/lib/services/manufacturingService.ts](../src/lib/services/manufacturingService.ts).
+
+### CQRS Application Layer (Commands & Queries)
+- **Manufacturing Application**:
+  - Commands: `PlanWorkOrderCommand`, `CancelWorkOrderCommand`
+  - Queries: `GetWorkOrderByIdQuery`, `ListWorkOrdersQuery`
+  - Test Suite: [src/modules/manufacturing/application/manufacturingCqrs.test.ts](../src/modules/manufacturing/application/manufacturingCqrs.test.ts) (4 tests passing)
+- **Procurement Application**:
+  - Commands: `CreatePurchaseRequisitionCommand`, `ApprovePurchaseRequisitionCommand`
+  - Queries: `ListPurchaseOrdersQuery`
+  - Test Suite: [src/modules/procurement/application/procurementCqrs.test.ts](../src/modules/procurement/application/procurementCqrs.test.ts) (3 tests passing)
+- **Planning Application**:
+  - Commands: `DispatchProductionPlanCommand`
+  - Queries: `GetProductionPlanHandler` (`getById`, `list`)
+  - Test Suite: [src/modules/planning/application/planningCqrs.test.ts](../src/modules/planning/application/planningCqrs.test.ts) (3 tests passing)
+- **Quality Application**:
+  - Commands: `EvaluateInspectionCommand`, `ResolveNcrCommand`
+  - Queries: `ListOpenNcrsQuery`
+  - Test Suite: [src/modules/quality/application/qualityCqrs.test.ts](../src/modules/quality/application/qualityCqrs.test.ts) (3 tests passing)
+- **Inventory Application**:
+  - Commands: `TransferStockCommand`, `ReverseMovementCommand`
+  - Queries: `Get5BucketBalanceQuery`
+  - Test Suite: [src/modules/inventory/application/inventoryCqrs.test.ts](../src/modules/inventory/application/inventoryCqrs.test.ts) (3 tests passing)
+
+### Verification
 - Targeted domain tests pass.
-- Full repository test suite passes (**87/87 tests passed**).
-- TypeScript compile and linter pass with 0 errors (`npm run lint`).
-- Production build succeeded (`npm run build` in 1.50s).
+- Full repository test suite passes (**116/116 tests passed across 15 suites**).
+- TypeScript compile and linter pass with 0 errors (`npm run lint` / `tsc --noEmit`).
+- Production build succeeded (`npm run build` in 1.61s).
 
 ---
 
@@ -160,4 +203,4 @@ The repository is being refactored incrementally toward a modular monolith with 
 npx tsx --test "src/**/*.test.ts" && npm run lint && npm run build
 ```
 
-Result: 87 tests passed, 0 failed; lint passed (0 errors); build succeeded (1.50s).
+Result: 116 tests passed, 0 failed; lint passed (0 errors); build succeeded (1.61s).

@@ -1,108 +1,92 @@
-# ERP Architecture Refactoring — Foundation First Plan
+# ERP Architecture Refactoring — Modular Monolith + CQRS Implementation Plan
 
-A systematic, architectural refactoring blueprint to transform the existing manufacturing ERP application into a maintainable, testable, production-ready modular monolith without breaking existing functionality or introducing new features.
+A systematic, architectural refactoring blueprint to transform the existing manufacturing ERP application into a maintainable, testable, production-ready modular monolith with explicit domain boundaries and CQRS application orchestration.
 
 ---
 
 > [!IMPORTANT]
-> **Confirmed Architectural Contract & User Decisions:**
-> 1. **Zero New Features Mandate**: Strictly no new ERP features, dashboards, AI workflows, or speculative modules. Focus is 100% on architecture, boundaries, decoupling, and testability.
-> 2. **Phase 0 Audit Complete**: Comprehensive audit documented in `docs/architecture/ARCHITECTURE_AUDIT.md`, identifying God Objects (`manufacturingService.ts`, `server.ts`, `src/types/index.ts`, `mockData.ts`) and coupling risks.
-> 3. **Detailed Extraction Plan Complete**: Multi-phase extraction strategy documented in `docs/architecture/REFACTORING_PLAN.md`, mapping responsibilities, target locations, dependencies, and validation criteria.
-> 4. **Persistence Boundary**: Implementation of the Repository Pattern with a server-authoritative in-memory adapter engineered with explicit seams for PostgreSQL / Drizzle ORM migration. Authoritative ERP data will not live in browser `localStorage`.
-> 5. **Preservation of Domain Knowledge & Invariants**: All 76 existing automated unit tests covering BOM explosion, finite capacity scheduling, cycle times, 5-bucket inventory, and approval workflows must pass continuously after every single change checkpoint.
+> **Confirmed Architectural Contract & Invariants:**
+> 1. **Zero New Features Mandate**: Strictly no speculative features or unrequested dependencies. Focus is 100% on modular boundaries, repository abstractions, CQRS application handlers, and domain purity.
+> 2. **Shared Kernel Foundation**: Primitives (`Result<T, E>`, `DomainError` hierarchy, and `paginateItems`) established in `src/shared/kernel`.
+> 3. **Authoritative Domain Repositories**: Every ERP business module has an authoritative repository backed by `ErpCollectionRepository` and `persistencePolicy`:
+>    - Manufacturing (`workOrderRepository.ts`)
+>    - Inventory (`inventoryRepository.ts`)
+>    - Quality (`qualityRepository.ts`)
+>    - Procurement (`procurementRepository.ts`)
+>    - Planning (`planningRepository.ts`)
+>    - Scheduling (`schedulingRepository.ts`)
+>    - Engineering (`engineeringRepository.ts`)
+>    - NPI (`npiRepository.ts`)
+>    - Maintenance (`maintenanceRepository.ts`)
+>    - Costing (`costingRepository.ts`)
+>    - Master Data (`masterDataRepository.ts`)
+>    - Workflow (`workflowRepository.ts`)
+> 4. **CQRS Application Layer**:
+>    - Commands modify state (Command -> Handler -> Domain / Write Repository)
+>    - Queries read state (Query -> Handler -> Read Repository / Query Service with projections & pagination)
+> 5. **Preservation of Domain Invariants**: 116 passing tests, 0 TypeScript errors (`npm run lint`), and clean production builds (`npm run build`).
 
 ---
 
-## 1. Overview & Core Concept
-
-### Target Architectural Topology: Modular Monolith
-The application remains deployable as a cohesive unit (Express server + Vite React SPA) while strictly enforcing internal boundaries between UI, application orchestration, domain calculations, and persistence infrastructure.
+## 1. Architectural Topology: Modular Monolith + CQRS
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        PRESENTATION (REACT SPA)                        │
 │   Operations Hub  │  Workflow Center  │  Settings & Master Data        │
 └──────────────────────────────────┬─────────────────────────────────────┘
-                                   │ (HTTP / Typed API Client)
+                                   │
                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                      APPLICATION & SERVER LAYER                        │
-│   Server Entrypoint (server.ts)  │  Route Controllers  │  RBAC Auth    │
+│                     CQRS APPLICATION LAYER                             │
+│   Commands: PlanWorkOrder, CancelWorkOrder, TransferStock, ResolveNcr  │
+│   Queries: ListWorkOrders, Get5BucketBalance, ListOpenNcrs             │
+└──────────────────┬───────────────────────────────┬─────────────────────┘
+                   │ (Write Path)                  │ (Read Path)
+                   ▼                               ▼
+┌──────────────────────────────────┐ ┌───────────────────────────────────┐
+│         DOMAIN LAYER             │ │       QUERY SERVICES              │
+│  • BOM Explosion                 │ │  • Projections & Pagination       │
+│  • 5-Bucket Inventory Ledger     │ │  • Capacity Aggregations          │
+│  • Finite Scheduling Engine      │ │  • Multi-attribute Search         │
+│  • ECR Impact Analysis & NPI     │ │  • Filtering & Sorting            │
+└──────────────────┬───────────────┘ └─────────────────┬─────────────────┘
+                   │                                   │
+                   ▼                                   ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                    AUTHORITATIVE REPOSITORIES                          │
+│   WorkOrder, Inventory, Quality, Procurement, Planning, Scheduling,    │
+│   Engineering, NPI, Maintenance, Costing, MasterData, Workflow         │
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    │
                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                        DOMAIN MODULE BOUNDARIES                        │
-│  ┌─────────────────────────────┐     ┌─────────────────────────────┐   │
-│  │   Manufacturing Domain      │     │   Planning & Scheduling     │   │
-│  │   • BOM Explosion Service   │     │   • Finite Capacity Engine  │   │
-│  │   • Work Order Lifecycle    │     │   • Machine Pacing & Gantt  │   │
-│  │   • Shop Floor Execution    │     │   • Feasibility Analyzer    │   │
-│  └─────────────────────────────┘     └─────────────────────────────┘   │
-│  ┌─────────────────────────────┐     ┌─────────────────────────────┐   │
-│  │   Inventory Ledger          │     │   Workflow & Governance     │   │
-│  │   • 5-Bucket Balance Engine │     │   • Condition Matrix Engine │   │
-│  │   • Immutable Reversals     │     │   • Multi-tier Sign-Off     │   │
-│  │   • Material Allocation     │     │   • SoD & SLA Monitoring    │   │
-│  └─────────────────────────────┘     └─────────────────────────────┘   │
-│  ┌─────────────────────────────┐     ┌─────────────────────────────┐   │
-│  │   Quality & Compliance      │     │   Procurement Domain        │   │
-│  │   • IQC / IPQC / FQC Gates  │     │   • PR Multi-tier Approval  │   │
-│  │   • Quarantine / NCR Dispos │     │   • PO Draft & GRN Postings │   │
-│  └─────────────────────────────┘     └─────────────────────────────┘   │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-                                   ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                       PERSISTENCE BOUNDARIES                           │
-│   Domain Repository Interfaces (IWorkOrderRepo, IInventoryRepo, etc.)  │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-                                   ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                   INFRASTRUCTURE & DATABASE ADAPTER                    │
-│   Authoritative Server Store  │  Postgres / Drizzle Relational Seams   │
+│               INFRASTRUCTURE PERSISTENCE (POSTGRES / SERVER)           │
+│   ErpCollectionRepository  │  persistencePolicy Source of Truth        │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 2. Phased Execution Roadmap
+## 2. Completed Milestones
 
-### Stage 1: Full Architectural Audit (`docs/architecture/ARCHITECTURE_AUDIT.md`) — [COMPLETED]
-* Detailed audit of all God Objects (`manufacturingService.ts`, `server.ts`, `src/types/index.ts`, `mockData.ts`).
-* Complete mapping of dependency directions and boundary violations.
-* Catalog of all existing manufacturing domain calculations to guarantee preservation.
-* Risk ranking: CRITICAL (`localStorage` source of truth, `manufacturingService.ts`), HIGH (`src/types/index.ts`, `server.ts`).
-
-### Stage 2: Define Architectural Contract (`docs/architecture/ERP_ARCHITECTURE.md`) — [COMPLETED]
-* Boundary rules: Module A may not import internal files of Module B; access only via exported public domain contracts.
-* Dependency direction: Domain logic must never import UI hooks, components, or infrastructure adapters.
-* Repository contract: All database read/writes routed through repository interfaces (`IWorkOrderRepository`, `IInventoryRepository`, `IQualityRepository`).
-
-### Stage 3: Concrete Refactoring Plan (`docs/architecture/REFACTORING_PLAN.md`) — [COMPLETED]
-* Detailed breakdown of `manufacturingService.ts` by line number and responsibility.
-* 10-phase incremental migration matrix with target locations and verification checks.
-
-### Stage 4: Incremental Extraction & Facade Decoupling — [READY FOR EXECUTION]
-1. **Work Order Domain**: Route order mutations through `IWorkOrderRepository` and `workOrderService.ts`.
-2. **Inventory 5-Bucket Ledger**: Route all movements and transfers through `IInventoryRepository` and `inventoryLedgerService.ts`.
-3. **Quality & NCR**: Route inspection sheets and NCRs through `IQualityRepository` and `qualityService.ts`.
-4. **Thin Facade Conversion**: Convert `manufacturingService.ts` into a lightweight delegator.
-
-### Stage 5: Domain Types Decoupling
-* Decompose monolithic `src/types/index.ts` into domain-owned type packages with backwards-compatible re-exports.
-
-### Stage 6: Server & Infrastructure Modularization
-* Split `server.ts` into HTTP bootstrap, `src/app/routes/`, and `src/infrastructure/ai/`.
-
----
-
-## 3. Checkpoint & Verification Strategy
-
-After every discrete extraction step:
-1. Run `npx tsx --test "src/**/*.test.ts"` (ensure $\ge 76$ tests pass without regression).
-2. Run `npm run lint` (`tsc --noEmit`).
-3. Run `npm run build` (`vite build`).
-4. Never proceed to the next extraction if a checkpoint fails.
+- [x] **Stage 1: Architecture Audit & Strategy Documentation**
+- [x] **Stage 2: Storage Isolation (Reject UI Storage Keys as ERP Source of Truth)**
+- [x] **Stage 3: Shared Kernel Primitive Extraction (`Result`, `DomainError`, `Pagination`)**
+- [x] **Stage 4: Domain Extraction for Core Subsystems**
+  - Manufacturing (`workOrderService.ts`, `bomExplosionService.ts`, `shopFloorService.ts`)
+  - Inventory (`inventoryLedgerService.ts`, `materialRequestService.ts`)
+  - Quality (`qualityService.ts`)
+  - Procurement (`procurementService.ts`, `goodsReceiptService.ts`)
+  - Planning (`planningService.ts`, `productionPlanDispatchService.ts`)
+  - Scheduling (`schedulingService.ts`, `finiteScheduleFactory.ts`, `whatIfScenarioFactory.ts`)
+  - Engineering (`engineeringService.ts`)
+  - NPI (`npiService.ts`)
+  - Workflow (`workflowService.ts`, `workflowMatrixService.ts`)
+- [x] **Stage 5: Modular Repositories Across All Modules**
+  - All 12 business modules have dedicated repository abstractions with automated unit test coverage.
+- [x] **Stage 6: CQRS Application Handlers (Commands & Queries)**
+  - Manufacturing, Procurement, Planning, Quality, and Inventory application layers extracted and tested.
+- [x] **Stage 7: Full Verification**
+  - 116 passing tests across 15 test suites.
+  - Clean `tsc --noEmit` and Vite production build.

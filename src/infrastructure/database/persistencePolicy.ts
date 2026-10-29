@@ -68,6 +68,8 @@ export const ERP_AUTHORITATIVE_COLLECTIONS = new Set([
   'materialconsumptions',
   'productionoutputreceipts',
   'featurestatus',
+  'approvalrequests',
+  'approvaltransactions',
 ]);
 
 export function isUiOnlyStorageKey(key: string): boolean {

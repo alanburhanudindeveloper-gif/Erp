@@ -5,3 +5,4 @@
 export * from './schedulingService';
 export * from './finiteScheduleFactory';
 export * from './whatIfScenarioFactory';
+export * from './schedulingRepository';

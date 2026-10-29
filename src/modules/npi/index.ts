@@ -3,3 +3,4 @@
  */
 
 export * from './npiService';
+export * from './npiRepository';

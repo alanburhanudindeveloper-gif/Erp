@@ -12,3 +12,4 @@ export * from './machineDowntimeService';
 export * from './materialRequestLifecycleService';
 export * from './productionReadinessEvaluator';
 export * from './productionService';
+export * from './application';

@@ -4,3 +4,5 @@
 
 export * from './procurementService';
 export * from './goodsReceiptService';
+export * from './procurementRepository';
+export * from './application';

@@ -20,3 +20,4 @@ export {
   recordScrapTransaction,
 } from './inventoryService';
 export * from './materialRequestService';
+export * from './application';
