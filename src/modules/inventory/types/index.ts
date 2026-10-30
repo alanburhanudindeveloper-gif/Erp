@@ -1,5 +1,5 @@
 // Domain-Owned Types for Inventory Bounded Context
-import type { UomCode } from '../../manufacturing/types';
+export type UomCode = 'PCS' | 'KG' | 'MTR' | 'LTR' | 'SET' | 'BOX' | 'ROLL';
 
 export type StockBucket = 'AVAILABLE' | 'RESERVED' | 'HOLD' | 'REJECTED' | 'WIP';
 

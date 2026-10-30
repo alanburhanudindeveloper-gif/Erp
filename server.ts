@@ -2,7 +2,6 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
 import { requireErpAuth } from './src/modules/security/authorizationService.ts';
 import {
   getCapacityOverview,
@@ -79,36 +78,11 @@ app.get('/api/erp/bom-explosion', requireErpAuth({ requiredRoles: ['Planner', 'S
 });
 
 import { aiTelemetryService } from './src/infrastructure/ai/aiTelemetryService.ts';
+import { aiGatewayAdapter } from './src/infrastructure/ai/aiGatewayAdapter.ts';
 
-// Initialize Gemini Client
-const apiKey = process.env.GEMINI_API_KEY;
-let aiClient: GoogleGenAI | null = null;
-if (apiKey) {
-  try {
-    aiClient = new GoogleGenAI();
-  } catch (err) {
-    console.warn('[AI Gateway] GoogleGenAI init notice:', err);
-  }
-}
-
-// Resilient Gemini runner with strict timeout guard
+// Resilient Gemini runner delegated to infrastructure AI Gateway Adapter
 async function callGeminiWithTimeout(prompt: string, timeoutMs = 5000): Promise<string | null> {
-  if (!aiClient || !apiKey) return null;
-  try {
-    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
-    const apiPromise = aiClient.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-    }).then((res) => res.text || null).catch((err) => {
-      console.warn('[AI Gateway API Error]', err?.message || err);
-      return null;
-    });
-
-    return await Promise.race([apiPromise, timeoutPromise]);
-  } catch (err) {
-    console.warn('[AI Gateway call error]', err);
-    return null;
-  }
+  return aiGatewayAdapter.callWithTimeout(prompt, timeoutMs);
 }
 
 /* -------------------------------------------------------------
@@ -119,7 +93,7 @@ async function callGeminiWithTimeout(prompt: string, timeoutMs = 5000): Promise<
 app.get('/api/ai/budget', (_req, res) => {
   res.json({
     ...aiTelemetryService.getStats(),
-    isConfigured: Boolean(apiKey),
+    isConfigured: aiGatewayAdapter.isConfigured(),
     activeModel: 'gemini-3.8-flash',
     provider: 'Google GenAI (Gemini 3.8 Flash)',
   });

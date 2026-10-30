@@ -21,3 +21,4 @@ export {
 } from './inventoryService';
 export * from './materialRequestService';
 export * from './application';
+export * from './presentation/hooks';

@@ -1,6 +1,6 @@
 import type { NonConformanceReport } from '../../../../types';
 import type { IQualityRepository } from '../../qualityRepository';
-import type { IInventoryRepository } from '../../../inventory/inventoryRepository';
+import type { IInventoryRepository } from '../../../inventory';
 import { resolveNcr, type NcrResolutionResult } from '../../qualityService';
 import { ok, fail, type Result } from '../../../../shared/kernel/result';
 import { NotFoundError, ValidationError, type DomainError } from '../../../../shared/kernel/errors';

@@ -7,3 +7,4 @@ export * from './productionPlanFactory';
 export * from './productionPlanDispatchService';
 export * from './planningRepository';
 export * from './application';
+export * from './presentation/hooks';

@@ -13,3 +13,4 @@ export * from './materialRequestLifecycleService';
 export * from './productionReadinessEvaluator';
 export * from './productionService';
 export * from './application';
+export * from './presentation/hooks';

@@ -191,29 +191,37 @@ import {
   processPilotRunRecord,
   buildProductReleasePackage,
 } from '../../modules/npi';
-import { createProcurementRepository, type IProcurementRepository } from '../../modules/procurement';
-import { createPlanningRepository, type IPlanningRepository } from '../../modules/planning';
-import { createSchedulingRepository, type ISchedulingRepository } from '../../modules/scheduling';
-import { createEngineeringRepository, type IEngineeringRepository } from '../../modules/engineering';
-import { createNpiRepository, type INpiRepository } from '../../modules/npi';
-import { createMaintenanceRepository, type IMaintenanceRepository } from '../../modules/maintenance';
-import { createCostingRepository, type ICostingRepository } from '../../modules/costing';
-import { createMasterDataRepository, type IMasterDataRepository } from '../../modules/master-data';
-import { createWorkflowRepository, type IWorkflowRepository } from '../../modules/workflow';
+// Authoritative Domain Repositories (Delegated to Composition Root)
+import {
+  workOrderRepository,
+  inventoryRepository,
+  qualityRepository,
+  procurementRepository,
+  planningRepository,
+  schedulingRepository,
+  engineeringRepository,
+  npiRepository,
+  maintenanceRepository,
+  costingRepository,
+  masterDataRepository,
+  workflowRepository,
+} from '../../app/composition/repositories';
+import { erpApplication } from '../../app/composition/dependencies';
 
-// Authoritative Domain Repositories (Modular Monolith Persistence Seam)
-export const workOrderRepository: IWorkOrderRepository = createWorkOrderRepository();
-export const inventoryRepository: IInventoryRepository = createInventoryRepository();
-export const qualityRepository: IQualityRepository = createQualityRepository();
-export const procurementRepository: IProcurementRepository = createProcurementRepository();
-export const planningRepository: IPlanningRepository = createPlanningRepository();
-export const schedulingRepository: ISchedulingRepository = createSchedulingRepository();
-export const engineeringRepository: IEngineeringRepository = createEngineeringRepository();
-export const npiRepository: INpiRepository = createNpiRepository();
-export const maintenanceRepository: IMaintenanceRepository = createMaintenanceRepository();
-export const costingRepository: ICostingRepository = createCostingRepository();
-export const masterDataRepository: IMasterDataRepository = createMasterDataRepository();
-export const workflowRepository: IWorkflowRepository = createWorkflowRepository();
+export {
+  workOrderRepository,
+  inventoryRepository,
+  qualityRepository,
+  procurementRepository,
+  planningRepository,
+  schedulingRepository,
+  engineeringRepository,
+  npiRepository,
+  maintenanceRepository,
+  costingRepository,
+  masterDataRepository,
+  workflowRepository,
+};
 
 export interface ErpState {
   products: Product[];
@@ -648,53 +656,57 @@ export function useErpStore() {
     return newOrder;
   }, [state.products, state.boms, state.routings, state.productReleases, state.productionOrders.length, addNotification]);
 
-  // 7.1 planWorkOrderById
+  // 7.1 planWorkOrderById (Delegated to CQRS PlanWorkOrderHandler)
   const planWorkOrderById = useCallback((orderId: string, bomId?: string, routingId?: string) => {
-    setState((prev) => {
-      const order = prev.productionOrders.find((o) => o.id === orderId);
-      if (!order) return prev;
-      const targetBomId = bomId || order.bomId;
-      const targetRoutingId = routingId || order.routingId;
-      const bom = prev.boms.find((b) => b.id === targetBomId) || prev.boms[0];
-      const routing = prev.routings.find((r) => r.id === targetRoutingId) || prev.routings[0];
+    const order = state.productionOrders.find((o) => o.id === orderId);
+    if (!order) return;
+    const targetBomId = bomId || order.bomId;
+    const targetRoutingId = routingId || order.routingId;
+    const bom = state.boms.find((b) => b.id === targetBomId) || state.boms[0];
+    const routing = state.routings.find((r) => r.id === targetRoutingId) || state.routings[0];
 
-      const result = planWorkOrder(order, bom, routing, prev.currentUser.name, prev.currentUser.role);
-      if (!result.allowed || !result.updatedOrder || !result.auditLog) {
-        return prev;
-      }
-
-      workOrderRepository.save(result.updatedOrder);
-
-      return {
-        ...prev,
-        productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? result.updatedOrder! : o)),
-        auditLogs: [result.auditLog, ...prev.auditLogs],
-      };
+    const outcome = erpApplication.manufacturing.planWorkOrder.execute({
+      orderId,
+      bom,
+      routing,
+      actor: state.currentUser.name,
+      role: state.currentUser.role,
     });
+
+    if (!outcome.isSuccess) {
+      addNotification('error', outcome.error.message);
+      return;
+    }
+
+    const updatedOrder = outcome.value;
+    setState((prev) => ({
+      ...prev,
+      productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? updatedOrder : o)),
+    }));
     addNotification('success', `Work order ${orderId} has been PLANNED with approved BOM and Routing.`);
-  }, [addNotification]);
+  }, [state.productionOrders, state.boms, state.routings, state.currentUser, addNotification]);
 
-  // 7.2 cancelWorkOrderById
+  // 7.2 cancelWorkOrderById (Delegated to CQRS CancelWorkOrderHandler)
   const cancelWorkOrderById = useCallback((orderId: string, reason: string) => {
-    setState((prev) => {
-      const order = prev.productionOrders.find((o) => o.id === orderId);
-      if (!order) return prev;
-
-      const result = cancelWorkOrder(order, prev.currentUser.name, prev.currentUser.role, reason);
-      if (!result.allowed || !result.updatedOrder || !result.auditLog) {
-        return prev;
-      }
-
-      workOrderRepository.save(result.updatedOrder);
-
-      return {
-        ...prev,
-        productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? result.updatedOrder! : o)),
-        auditLogs: [result.auditLog, ...prev.auditLogs],
-      };
+    const outcome = erpApplication.manufacturing.cancelWorkOrder.execute({
+      orderId,
+      reason,
+      actor: state.currentUser.name,
+      role: state.currentUser.role,
     });
+
+    if (!outcome.isSuccess) {
+      addNotification('error', outcome.error.message);
+      return;
+    }
+
+    const updatedOrder = outcome.value;
+    setState((prev) => ({
+      ...prev,
+      productionOrders: prev.productionOrders.map((o) => (o.id === orderId ? updatedOrder : o)),
+    }));
     addNotification('warning', `Work order ${orderId} CANCELLED. Justification: ${reason}`);
-  }, [addNotification]);
+  }, [state.currentUser, addNotification]);
 
   // 8. reportMachineBreakdown (Page 101)
   const reportMachineBreakdown = useCallback((
@@ -756,7 +768,7 @@ export function useErpStore() {
     addNotification('success', `Testing Scenario ${scenarioId} executed successfully: Expected domain result validated.`);
   }, [addNotification]);
 
-  // 12. Create Purchase Requisition (UC-PRC-001 & BR-GLOBAL-002)
+  // 12. Create Purchase Requisition (Delegated to CQRS CreatePurchaseRequisitionHandler)
   const createPurchaseRequisition = useCallback(
     (data: {
       requesterName: string;
@@ -770,16 +782,9 @@ export function useErpStore() {
         supplierPreferred?: string;
       }[];
     }) => {
-      const prSeq = (state.purchaseRequisitions.length + 1).toString().padStart(6, '0');
-      const prNumber = `PR-2026-${prSeq}`;
-      const now = new Date();
-      const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-
-      let totalAmount = 0;
       const prItems = data.items.map((item, idx) => {
         const prod = state.products.find((p) => p.id === item.productId);
         const cost = item.quantity * item.estimatedPrice;
-        totalAmount += cost;
         return {
           id: `pri-${Date.now()}-${idx}`,
           productId: item.productId,
@@ -793,111 +798,63 @@ export function useErpStore() {
         };
       });
 
-      // Tiered Approval Engine:
-      // < 10M => Level 1 (Dept Supervisor)
-      // 10M - 100M => Level 2 (Plant Manager)
-      // > 100M => Level 3 (Operations Director)
-      let approvalLevel: 1 | 2 | 3 = 1;
-      if (totalAmount > 100000000) {
-        approvalLevel = 3;
-      } else if (totalAmount >= 10000000) {
-        approvalLevel = 2;
-      }
-
-      const newPR: PurchaseRequisition = {
-        id: `pr-${Date.now()}`,
-        prNumber,
+      const outcome = erpApplication.procurement.createPurchaseRequisition.execute({
         requesterId: state.currentUser.id || 'usr-001',
         requesterName: data.requesterName || state.currentUser.name,
         department: data.department || 'Operations',
         requiredDate: data.requiredDate,
         reason: data.reason,
         plantId: state.selectedPlant,
-        status: 'PENDING_APPROVAL',
-        totalAmount,
-        approvalLevelRequired: approvalLevel,
         items: prItems,
-        createdAt: timeStr,
-      };
+      });
 
-      const audit: AuditLogEntry = {
-        id: `aud-${Date.now()}`,
-        documentId: prNumber,
-        documentType: 'PURCHASE_REQUISITION',
-        action: 'CREATE_PR',
-        actor: newPR.requesterName,
-        role: state.currentUser.role,
-        timestamp: timeStr,
-        newStatus: 'PENDING_APPROVAL',
-        decision: 'EXECUTED',
-        reason: `Created PR ${prNumber} with Total Rp ${totalAmount.toLocaleString('id-ID')}. Assigned to Approval Level ${approvalLevel}.`,
-      };
+      if (!outcome.isSuccess) {
+        addNotification('error', outcome.error.message);
+        return null;
+      }
 
+      const newPR = outcome.value;
       setState((prev) => ({
         ...prev,
         purchaseRequisitions: [newPR, ...prev.purchaseRequisitions],
-        auditLogs: [audit, ...prev.auditLogs],
       }));
 
-      addNotification('success', `Created PR ${prNumber} (Total: Rp ${totalAmount.toLocaleString('id-ID')}, Level ${approvalLevel} Approval).`);
+      addNotification('success', `Created PR ${newPR.prNumber} (Total: Rp ${newPR.totalAmount.toLocaleString('id-ID')}, Level ${newPR.approvalLevelRequired} Approval).`);
       return newPR;
     },
-    [state.purchaseRequisitions.length, state.products, state.currentUser, state.selectedPlant, addNotification]
+    [state.products, state.currentUser, state.selectedPlant, addNotification]
   );
 
-  // 13. Approve Purchase Requisition (UC-PRC-002 & BR-PRC-002 SoD Enforcement)
+  // 13. Approve Purchase Requisition (Delegated to CQRS ApprovePurchaseRequisitionHandler)
   const approvePurchaseRequisition = useCallback(
     (prId: string, approverName?: string, approverRole?: string): { success: boolean; error?: string } => {
-      const pr = state.purchaseRequisitions.find((p) => p.id === prId);
-      if (!pr) return { success: false, error: 'PR not found' };
-
       const activeUser = approverName || state.currentUser.name;
       const activeRole = approverRole || state.currentUser.role;
 
-      const approvalGate = evaluatePurchaseRequisitionApproval(pr, activeUser, activeRole, 'Manager');
+      const outcome = erpApplication.procurement.approvePurchaseRequisition.execute({
+        prId,
+        actorName: activeUser,
+        actorRole: activeRole,
+      });
 
-      if (!approvalGate.allowed) {
-        const errorMsg = approvalGate.reason || 'Approval is not permitted for this request.';
+      if (!outcome.isSuccess) {
+        const errorMsg = outcome.error.message;
         addNotification('error', errorMsg);
         return { success: false, error: errorMsg };
       }
 
-      const now = new Date();
-      const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-
-      const audit: AuditLogEntry = {
-        id: `aud-${Date.now()}`,
-        documentId: pr.prNumber,
-        documentType: 'PURCHASE_REQUISITION',
-        action: 'APPROVE_PR',
-        actor: activeUser,
-        role: activeRole,
-        timestamp: timeStr,
-        oldStatus: pr.status,
-        newStatus: 'APPROVED',
-        decision: 'APPROVED',
-        reason: `Approved Level ${pr.approvalLevelRequired} Purchase Requisition after verifying budget and necessity.`,
-      };
-
+      const updatedPr = outcome.value;
       setState((prev) => ({
         ...prev,
         purchaseRequisitions: prev.purchaseRequisitions.map((p) =>
-          p.id === prId
-            ? {
-                ...p,
-                status: 'APPROVED' as const,
-                approvedBy: `${activeUser} (${activeRole})`,
-                approvedAt: timeStr,
-              }
-            : p
+          p.id === prId ? updatedPr : p
         ),
-        auditLogs: [audit, ...prev.auditLogs],
       }));
 
-      addNotification('success', `Purchase Requisition ${pr.prNumber} has been APPROVED by ${activeUser}. Ready for PO creation.`);
+      addNotification('success', `Purchase Requisition ${updatedPr.prNumber} has been APPROVED by ${activeUser}. Ready for PO creation.`);
       return { success: true };
     },
-    [state.purchaseRequisitions, state.currentUser, addNotification]
+    [state.currentUser, addNotification]
   );
 
   // 14. Reject Purchase Requisition (UC-PRC-002)
@@ -1990,6 +1947,7 @@ export function useErpStore() {
     [addNotification]
   );
 
+  // Delegated to CQRS DispatchProductionPlanHandler
   const generateWorkOrderFromPlan = useCallback(
     (planId: string): { success: boolean; orderId?: string; error?: string } => {
       const plan = state.productionPlans.find((p) => p.id === planId);
@@ -1999,31 +1957,30 @@ export function useErpStore() {
         (r) => (r.productId === plan.productId || r.productSku === plan.productSku) && r.status === 'ACTIVE'
       ) || state.routings.find((r) => r.productId === plan.productId || r.productSku === plan.productSku);
 
-      const result = dispatchProductionPlan({
-        plan,
+      const outcome = erpApplication.planning.dispatchProductionPlan.execute({
+        planId,
         routing,
-        createProductionOrder: (input) => createProductionOrder(input),
       });
 
-      if (!result.success) {
-        addNotification('error', result.error || 'Work order dispatch failed.');
-        return result;
+      if (!outcome.isSuccess) {
+        const errorMsg = outcome.error.message;
+        addNotification('error', errorMsg);
+        return { success: false, error: errorMsg };
       }
 
-      const mo = state.productionOrders.find((order) => order.id === result.orderId);
-      if (mo) {
-        setState((prev) => ({
-          ...prev,
-          productionPlans: prev.productionPlans.map((p) =>
-            p.id === planId ? { ...p, status: 'DISPATCHED' as const, generatedWorkOrderId: mo.id } : p
-          ),
-        }));
-        addNotification('success', `Dispatched Work Order ${mo.orderNumber} from Plan ${plan.planNumber}. BOM & Routing revisions snapshot frozen per Rule 10.`);
-      }
+      const createdOrder = outcome.value;
+      setState((prev) => ({
+        ...prev,
+        productionOrders: [createdOrder, ...prev.productionOrders],
+        productionPlans: prev.productionPlans.map((p) =>
+          p.id === planId ? { ...p, status: 'DISPATCHED' as const, generatedWorkOrderId: createdOrder.id } : p
+        ),
+      }));
 
-      return result;
+      addNotification('success', `Dispatched Work Order ${createdOrder.orderNumber} from Plan ${plan.planNumber}.`);
+      return { success: true, orderId: createdOrder.id };
     },
-    [state.productionPlans, state.routings, state.productionOrders, createProductionOrder, addNotification]
+    [state.productionPlans, state.routings, addNotification]
   );
 
   const runFiniteScheduling = useCallback(
@@ -2206,105 +2163,91 @@ export function useErpStore() {
   // 35. Inventory 5-Bucket Transfer & Compensating Reversals
   const transferStockBetweenBucketsHandler = useCallback(
     (input: BucketTransferInput) => {
-      const result = transferStockBetweenBuckets(input, state.stockMovements);
-      if (!result.success || !result.movement || !result.auditLog) {
-        addNotification('error', result.reason || 'Bucket transfer rejected.');
-        return { success: false, reason: result.reason };
+      const outcome = erpApplication.inventory.transferStock.execute(input);
+      if (!outcome.isSuccess) {
+        const errorMsg = outcome.error.message;
+        addNotification('error', errorMsg);
+        return { success: false, reason: errorMsg };
       }
-      inventoryRepository.recordMovement(result.movement);
+      const movement = outcome.value;
       setState((prev) => ({
         ...prev,
-        stockMovements: [result.movement!, ...prev.stockMovements],
-        auditLogs: [result.auditLog!, ...prev.auditLogs],
+        stockMovements: [movement, ...prev.stockMovements],
       }));
-      addNotification('success', result.reason || `Transferred ${input.quantity} of ${input.sku} to ${input.toBucket}.`);
-      return { success: true, movement: result.movement };
+      addNotification('success', `Transferred ${input.quantity} of ${input.sku} to ${input.toBucket}.`);
+      return { success: true, movement };
     },
-    [state.stockMovements, addNotification]
+    [addNotification]
   );
 
   const reverseStockMovementHandler = useCallback(
     (movementId: string, reversalReason: string) => {
-      const original = state.stockMovements.find((m) => m.id === movementId);
-      if (!original) {
-        addNotification('error', 'Original stock movement not found.');
-        return { success: false, reason: 'Movement not found' };
+      const outcome = erpApplication.inventory.reverseMovement.execute({
+        movementId,
+        actor: state.currentUser.name,
+        role: state.currentUser.role,
+        reason: reversalReason,
+      });
+      if (!outcome.isSuccess) {
+        const errorMsg = outcome.error.message;
+        addNotification('error', errorMsg);
+        return { success: false, reason: errorMsg };
       }
-      const result = reverseStockMovement(
-        original,
-        state.currentUser.name,
-        state.currentUser.role,
-        reversalReason
-      );
-      if (!result.success || !result.reversalMovement || !result.auditLog) {
-        addNotification('error', result.reason || 'Reversal rejected.');
-        return { success: false, reason: result.reason };
-      }
-      inventoryRepository.recordMovement(result.reversalMovement);
+      const reversalMovement = outcome.value;
       setState((prev) => ({
         ...prev,
         stockMovements: [
-          result.reversalMovement!,
+          reversalMovement,
           ...prev.stockMovements.map((m) =>
             m.id === movementId
               ? {
                   ...m,
                   isReversed: true,
-                  reversedAt: result.reversalMovement!.timestamp,
+                  reversedAt: reversalMovement.timestamp,
                   reversalReason,
                 }
               : m
           ),
         ],
-        auditLogs: [result.auditLog!, ...prev.auditLogs],
       }));
-      addNotification('success', `Compensating reversal posted: ${result.reversalMovement.movementNo}.`);
-      return { success: true, reversalMovement: result.reversalMovement };
+      addNotification('success', `Compensating reversal posted: ${reversalMovement.movementNo}.`);
+      return { success: true, reversalMovement };
     },
-    [state.stockMovements, state.currentUser, addNotification]
+    [state.currentUser, addNotification]
   );
 
-  // 36. Quality NCR Resolution
+  // 36. Quality NCR Resolution (Delegated to CQRS ResolveNcrHandler)
   const resolveNcrHandler = useCallback(
     (
       ncrId: string,
       disposition: 'SCRAP' | 'REWORK' | 'USE_AS_IS',
       rootCause: string
     ) => {
-      const ncr = state.ncrs.find((n) => n.id === ncrId);
-      if (!ncr) {
-        addNotification('error', 'NCR not found.');
-        return { success: false, error: 'NCR not found' };
+      const outcome = erpApplication.quality.resolveNcr.execute({
+        ncrId,
+        disposition,
+        rootCause,
+        resolver: state.currentUser.name,
+      });
+
+      if (!outcome.isSuccess) {
+        const errorMsg = outcome.error.message;
+        addNotification('error', errorMsg);
+        return { success: false, error: errorMsg };
       }
-      try {
-        const result = resolveNcr({
-          ncr,
-          disposition,
-          rootCause,
-          resolver: state.currentUser.name,
-        });
 
-        result.stockMovements.forEach((movement) => {
-          inventoryRepository.recordMovement(movement);
-        });
-        qualityRepository.saveNcr(result.resolvedNcr);
+      const result = outcome.value;
+      setState((prev) => ({
+        ...prev,
+        ncrs: prev.ncrs.map((n) => (n.id === ncrId ? result.resolvedNcr : n)),
+        stockMovements: [...result.stockMovements, ...prev.stockMovements],
+        auditLogs: [result.auditLog, ...prev.auditLogs],
+      }));
 
-        setState((prev) => ({
-          ...prev,
-          ncrs: prev.ncrs.map((n) => (n.id === ncrId ? result.resolvedNcr : n)),
-          stockMovements: [...result.stockMovements, ...prev.stockMovements],
-          auditLogs: [result.auditLog, ...prev.auditLogs],
-        }));
-
-        addNotification('success', `NCR ${ncr.ncrNo} resolved with disposition ${disposition}.`);
-        return { success: true, resolvedNcr: result.resolvedNcr };
-      } catch (err: any) {
-        const msg = err?.message || 'Failed to resolve NCR.';
-        addNotification('error', msg);
-        return { success: false, error: msg };
-      }
+      addNotification('success', `NCR resolved with disposition ${disposition}.`);
+      return { success: true, resolvedNcr: result.resolvedNcr };
     },
-    [state.ncrs, state.currentUser, addNotification]
+    [state.currentUser, addNotification]
   );
 
   // Reset to initial baseline

@@ -4,3 +4,4 @@ export * from './types';
 export * from './qualityRepository';
 export * from './qualityService';
 export * from './application';
+export * from './presentation/hooks';

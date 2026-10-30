@@ -1,6 +1,6 @@
 import type { ProductionOrder, Routing } from '../../../../types';
 import type { IPlanningRepository } from '../../planningRepository';
-import type { IWorkOrderRepository } from '../../../manufacturing/workOrderRepository';
+import type { IWorkOrderRepository } from '../../../manufacturing';
 import { dispatchProductionPlan } from '../../productionPlanDispatchService';
 import { ok, fail, type Result } from '../../../../shared/kernel/result';
 import { NotFoundError, ValidationError, type DomainError } from '../../../../shared/kernel/errors';
