@@ -44,11 +44,23 @@ export function loadLegacyErpState(): Record<string, unknown> | null {
     }
 
     const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // Strip authoritative server-managed entities so stale values are never restored
+    delete parsed.purchaseRequisitions;
+    delete parsed.purchaseOrders;
+    delete parsed.goodsReceiptNotes;
+
     legacyStateRepository.save('legacy_state', [{ id: 'snapshot', value: parsed } as Record<string, unknown> & { id: string }]);
     return parsed;
   } catch {
     const stored = legacyStateRepository.list('legacy_state')[0] as Record<string, unknown> | undefined;
-    return stored ? (stored.value as Record<string, unknown>) : null;
+    if (stored?.value) {
+      const val = { ...(stored.value as Record<string, unknown>) };
+      delete val.purchaseRequisitions;
+      delete val.purchaseOrders;
+      delete val.goodsReceiptNotes;
+      return val;
+    }
+    return null;
   }
 }
 
@@ -59,9 +71,15 @@ export function saveLegacyErpState(state: Record<string, unknown>): void {
   }
 
   try {
-    const snapshot = { id: 'snapshot', value: state };
+    // Authoritative ERP entities for migrated modules are never persisted to browser localStorage
+    const sanitizedState = { ...state };
+    delete sanitizedState.purchaseRequisitions;
+    delete sanitizedState.purchaseOrders;
+    delete sanitizedState.goodsReceiptNotes;
+
+    const snapshot = { id: 'snapshot', value: sanitizedState };
     legacyStateRepository.save('legacy_state', [snapshot]);
-    localStorage.setItem(LEGACY_ERP_STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(LEGACY_ERP_STORAGE_KEY, JSON.stringify(sanitizedState));
   } catch {
     // Temporary local demo persistence only; runtime continues without storage.
   }

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { PurchaseOrder, PurchaseOrderStatus } from '../../../../types';
-import { erpApplication } from '../../../../app/composition/dependencies';
+import { erpApiClient } from '../../../../infrastructure/api/erpApiClient';
 
 export interface UsePurchaseOrdersOptions {
   page?: number;
@@ -22,11 +22,11 @@ export function usePurchaseOrders(options: UsePurchaseOrdersOptions = {}) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchOrders = useCallback(() => {
+  const fetchOrders = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = erpApplication.procurement.listPurchaseOrders.execute({
+      const result = await erpApiClient.procurement.listPurchaseOrders({
         page,
         limit,
         status,

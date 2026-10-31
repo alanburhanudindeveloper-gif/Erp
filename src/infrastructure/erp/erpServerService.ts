@@ -1,19 +1,12 @@
-import { createInMemoryErpRepository, type InMemoryRecord } from '../database/index.ts';
-import { createErpServerRepository } from '../database/erpServerRepository.ts';
+import { erpRepositories } from '../../app/composition/repositories';
 import {
-  INITIAL_BOMS,
   INITIAL_CHANGEOVER_RULES,
   INITIAL_DEMANDS,
   INITIAL_MACHINES,
   INITIAL_MANPOWER,
-  INITIAL_NCRS,
-  INITIAL_PRODUCTION_ORDERS,
-  INITIAL_PRODUCTS,
-  INITIAL_QUALITY_INSPECTIONS,
   INITIAL_ROUTINGS,
   INITIAL_TESTING_SCENARIOS,
   INITIAL_WORK_CENTERS,
-  INITIAL_WORKFLOWS,
 } from '../../lib/mockData';
 import { evaluateCapacityLoad } from '../../modules/capacity/capacityService';
 import { getInventoryHealth } from '../../modules/inventory/inventoryService';
@@ -43,22 +36,20 @@ export interface ErpDashboardSummary {
   shortageAlerts: number;
 }
 
-const repository = createErpServerRepository();
-
 function listProducts(): Product[] {
-  return repository.list('products') as unknown as Product[];
+  return erpRepositories.masterData.listProducts();
 }
 
 function listBoms(): BillOfMaterials[] {
-  return repository.list('boms') as unknown as BillOfMaterials[];
+  return erpRepositories.masterData.listBoms();
 }
 
 function listProductionOrders(): ProductionOrder[] {
-  return repository.list('productionOrders') as unknown as ProductionOrder[];
+  return erpRepositories.workOrder.listAll();
 }
 
 function listWorkflows(): WorkflowDefinition[] {
-  return repository.list('workflows') as unknown as WorkflowDefinition[];
+  return erpRepositories.workflow.listWorkflows();
 }
 
 export function getErpDashboardSummary(): ErpDashboardSummary {
@@ -80,12 +71,13 @@ export function getErpDashboardSummary(): ErpDashboardSummary {
 }
 
 export function getInventoryOverview(): ErpInventoryItem[] {
-  return getInventoryHealth(listProducts()).map((item) => ({
+  const products = listProducts();
+  return getInventoryHealth(products).map((item) => ({
     sku: item.sku,
     name: item.name,
     available: item.availableToPromise,
-    allocated: listProducts().find((product) => product.sku === item.sku)?.allocatedStock ?? 0,
-    onOrder: listProducts().find((product) => product.sku === item.sku)?.onOrderStock ?? 0,
+    allocated: products.find((product) => product.sku === item.sku)?.allocatedStock ?? 0,
+    onOrder: products.find((product) => product.sku === item.sku)?.onOrderStock ?? 0,
     status: item.status === 'HEALTHY' ? 'ACTIVE' : 'INACTIVE',
   }));
 }
@@ -122,24 +114,29 @@ export function getWorkflowOverview() {
 }
 
 export function getPlanningOverview() {
-  const product = INITIAL_PRODUCTS.find((item) => item.sku === 'Product A') ?? INITIAL_PRODUCTS[0];
+  const products = listProducts();
+  const boms = listBoms();
+  const routings = erpRepositories.masterData.listRoutings();
+  const product = products.find((item) => item.sku === 'Product A') ?? products[0];
   const demand = INITIAL_DEMANDS.find((item) => item.productSku === product.sku) ?? INITIAL_DEMANDS[0];
 
   return summarizeProductionPlanning(
     product.id,
     demand.quantity,
-    INITIAL_PRODUCTS,
-    INITIAL_BOMS,
-    INITIAL_ROUTINGS,
+    products,
+    boms,
+    routings.length > 0 ? routings : INITIAL_ROUTINGS,
     INITIAL_MACHINES,
     INITIAL_MANPOWER
   );
 }
 
 export function getSchedulingOverview() {
-  const product = INITIAL_PRODUCTS.find((item) => item.sku === 'Product A') ?? INITIAL_PRODUCTS[0];
+  const products = listProducts();
+  const routings = erpRepositories.masterData.listRoutings();
+  const product = products.find((item) => item.sku === 'Product A') ?? products[0];
   const demand = INITIAL_DEMANDS.find((item) => item.productSku === product.sku) ?? INITIAL_DEMANDS[0];
-  const routing = INITIAL_ROUTINGS.find((item) => item.productId === product.id && item.status === 'ACTIVE') ?? INITIAL_ROUTINGS[0];
+  const routing = routings.find((item) => item.productId === product.id && item.status === 'ACTIVE') ?? INITIAL_ROUTINGS[0];
 
   const slots = generateFiniteScheduleSlots(
     demand,
@@ -167,7 +164,10 @@ export function getSchedulingOverview() {
 }
 
 export function getCapacityOverview() {
-  return INITIAL_WORK_CENTERS.map((workCenter) => {
+  const workCenters = erpRepositories.masterData.listWorkCenters();
+  const targets = workCenters.length > 0 ? workCenters : INITIAL_WORK_CENTERS;
+
+  return targets.map((workCenter) => {
     const availableMinutes = workCenter.capacityHoursPerDay * 60;
     const requiredMinutes = workCenter.code === 'WC-CUT-01' ? 520 : 360;
     const capacity = evaluateCapacityLoad(availableMinutes, requiredMinutes);
@@ -190,8 +190,8 @@ export function getTestingOverview() {
 }
 
 export function getQualityOverview() {
-  const inspections = INITIAL_QUALITY_INSPECTIONS;
-  const ncrs = INITIAL_NCRS;
+  const inspections = erpRepositories.quality.listInspections();
+  const ncrs = erpRepositories.quality.listNcrs();
   const passedCount = inspections.filter((i) => i.result === 'PASS').length;
   const failedCount = inspections.filter((i) => i.result === 'FAIL').length;
   const openNcrs = ncrs.filter((n) => n.status === 'OPEN').length;
@@ -208,9 +208,11 @@ export function getQualityOverview() {
 }
 
 export function getBomExplosionOverview(productId?: string, quantity: number = 100) {
+  const products = listProducts();
+  const boms = listBoms();
   const targetProduct = productId
-    ? INITIAL_PRODUCTS.find((p) => p.id === productId || p.sku === productId) || INITIAL_PRODUCTS[0]
-    : INITIAL_PRODUCTS[0];
+    ? products.find((p) => p.id === productId || p.sku === productId) || products[0]
+    : products[0];
 
-  return explodeBom(targetProduct.id, quantity, INITIAL_PRODUCTS, INITIAL_BOMS);
+  return explodeBom(targetProduct.id, quantity, products, boms);
 }

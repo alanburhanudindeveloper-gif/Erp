@@ -28,6 +28,12 @@ import {
 import { EnterpriseDataGrid } from '../../components/data-grid/EnterpriseDataGrid';
 import { GridColumn, BulkAction } from '../../components/data-grid/types';
 import { StatusBadge } from '../../components/common/StatusBadge';
+import {
+  usePurchaseRequisitions,
+  usePurchaseOrders,
+  useCreatePurchaseRequisition,
+  useApprovePurchaseRequisition,
+} from './presentation/hooks';
 
 interface ProcurementViewProps {
   purchaseRequisitions: PurchaseRequisition[];
@@ -81,8 +87,8 @@ interface ProcurementViewProps {
 }
 
 export const ProcurementView: React.FC<ProcurementViewProps> = ({
-  purchaseRequisitions,
-  purchaseOrders,
+  purchaseRequisitions: propPRs,
+  purchaseOrders: propPOs,
   goodsReceiptNotes,
   suppliers,
   products,
@@ -97,6 +103,24 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
   onSwitchUser,
   onNavigateToQuality,
 }) => {
+  // Authoritative server-managed state via CQRS hooks
+  const {
+    requisitions: serverPRs,
+    refresh: refreshPRs,
+  } = usePurchaseRequisitions();
+
+  const {
+    orders: serverPOs,
+    refresh: refreshPOs,
+  } = usePurchaseOrders();
+
+  const { createPR: serverCreatePR } = useCreatePurchaseRequisition();
+  const { approvePR: serverApprovePR } = useApprovePurchaseRequisition();
+
+  // Authoritative server state takes priority over legacy props
+  const purchaseRequisitions = serverPRs.length > 0 ? serverPRs : propPRs;
+  const purchaseOrders = serverPOs.length > 0 ? serverPOs : propPOs;
+
   // Modal states
   const [showCreatePrModal, setShowCreatePrModal] = useState(false);
   const [showCreatePoModal, setShowCreatePoModal] = useState(false);
@@ -148,22 +172,71 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
   const approvedPRs = purchaseRequisitions.filter((p) => p.status === 'APPROVED');
   const activePOs = purchaseOrders.filter((p) => p.status === 'APPROVED' || p.status === 'PARTIALLY_RECEIVED');
 
-  const handleCreatePrSubmit = (e: React.FormEvent) => {
+  const handleApprovePrAction = async (prId: string) => {
+    const outcome = await serverApprovePR({
+      prId,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+    });
+    if (outcome.success) {
+      await refreshPRs();
+    }
+    if (onApprovePR) {
+      onApprovePR(prId, currentUser.name, currentUser.role);
+    }
+    return outcome;
+  };
+
+  const handleCreatePrSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onCreatePR({
+    const prod = products.find((p) => p.id === newPrItemProduct);
+    const quantity = Number(newPrItemQty);
+    const estimatedPrice = Number(newPrItemPrice);
+    const totalCost = quantity * estimatedPrice;
+
+    // 1. Authoritative server CQRS mutation
+    const outcome = await serverCreatePR({
+      requesterId: currentUser.id,
       requesterName: currentUser.name,
       department: newPrDept,
       requiredDate: newPrRequiredDate,
       reason: newPrReason,
+      plantId: 'PLANT-01',
       items: [
         {
+          id: `pri-${Date.now()}-0`,
           productId: newPrItemProduct,
-          quantity: Number(newPrItemQty),
-          estimatedPrice: Number(newPrItemPrice),
+          sku: prod ? prod.sku : 'SKU-001',
+          name: prod ? prod.name : 'Component Material',
+          quantity,
+          uom: prod ? prod.baseUom : 'PCS',
+          estimatedPrice,
+          totalCost,
         },
       ],
     });
-    setShowCreatePrModal(false);
+
+    if (outcome.success) {
+      await refreshPRs();
+      setShowCreatePrModal(false);
+    }
+
+    // 2. Prop callback for UI notifications and compatibility
+    if (onCreatePR) {
+      onCreatePR({
+        requesterName: currentUser.name,
+        department: newPrDept,
+        requiredDate: newPrRequiredDate,
+        reason: newPrReason,
+        items: [
+          {
+            productId: newPrItemProduct,
+            quantity,
+            estimatedPrice,
+          },
+        ],
+      });
+    }
   };
 
   const handleCreatePoSubmit = (e: React.FormEvent) => {
@@ -282,7 +355,7 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onApprovePR(row.id);
+                      handleApprovePrAction(row.id);
                     }}
                     title={
                       isRequester
@@ -340,7 +413,7 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
         },
       },
     ],
-    [currentUser.name, onApprovePR]
+    [currentUser.name, handleApprovePrAction, onApprovePR]
   );
 
   // Bulk actions for PR Grid
@@ -353,13 +426,13 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
         onClick: (selected) => {
           selected.forEach((pr) => {
             if (pr.status === 'PENDING_APPROVAL') {
-              onApprovePR(pr.id);
+              handleApprovePrAction(pr.id);
             }
           });
         },
       },
     ],
-    [onApprovePR]
+    [handleApprovePrAction, onApprovePR]
   );
 
   // 2. Columns for Purchase Orders Grid

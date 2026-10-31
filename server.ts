@@ -77,8 +77,15 @@ app.get('/api/erp/bom-explosion', requireErpAuth({ requiredRoles: ['Planner', 'S
   res.json({ explosion: getBomExplosionOverview(productId, isNaN(quantity) ? 100 : quantity) });
 });
 
+import { erpRouter } from './src/infrastructure/api/erpRouter.ts';
+
+// Authoritative ERP CQRS & Repository Routes
+app.use('/api/erp', erpRouter);
+
 import { aiTelemetryService } from './src/infrastructure/ai/aiTelemetryService.ts';
 import { aiGatewayAdapter } from './src/infrastructure/ai/aiGatewayAdapter.ts';
+
+export { app };
 
 // Resilient Gemini runner delegated to infrastructure AI Gateway Adapter
 async function callGeminiWithTimeout(prompt: string, timeoutMs = 5000): Promise<string | null> {
