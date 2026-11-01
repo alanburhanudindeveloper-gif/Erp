@@ -3,12 +3,19 @@
  *
  * Assembles and wires commands and queries across domain boundaries.
  * Application use cases receive their required repository ports from the composition container.
+ * Injects atomic Unit of Work transaction boundaries into multi-step commands.
  */
 
 import { type ErpRepositories, erpRepositories } from './repositories';
+import { type IUnitOfWork, InMemoryUnitOfWork } from '../../shared/kernel/unitOfWork';
 import {
   PlanWorkOrderHandler,
   CancelWorkOrderHandler,
+  CreateProductionOrderHandler,
+  ReleaseProductionOrderHandler,
+  StartProductionOperationHandler,
+  CompleteProductionOperationHandler,
+  CloseProductionOrderHandler,
   GetWorkOrderByIdHandler,
   ListWorkOrdersHandler,
 } from '../../modules/manufacturing/application';
@@ -34,9 +41,15 @@ import {
 } from '../../modules/inventory/application';
 
 export interface ErpApplication {
+  unitOfWork: IUnitOfWork;
   manufacturing: {
     planWorkOrder: PlanWorkOrderHandler;
     cancelWorkOrder: CancelWorkOrderHandler;
+    createProductionOrder: CreateProductionOrderHandler;
+    releaseProductionOrder: ReleaseProductionOrderHandler;
+    startProductionOperation: StartProductionOperationHandler;
+    completeProductionOperation: CompleteProductionOperationHandler;
+    closeProductionOrder: CloseProductionOrderHandler;
     getWorkOrderById: GetWorkOrderByIdHandler;
     listWorkOrders: ListWorkOrdersHandler;
   };
@@ -63,16 +76,27 @@ export interface ErpApplication {
 }
 
 export function createErpApplication(repos: ErpRepositories = erpRepositories): ErpApplication {
+  const uow = new InMemoryUnitOfWork([
+    repos.procurement,
+    repos.workflow,
+  ]);
+
   return {
+    unitOfWork: uow,
     manufacturing: {
       planWorkOrder: new PlanWorkOrderHandler(repos.workOrder),
       cancelWorkOrder: new CancelWorkOrderHandler(repos.workOrder),
+      createProductionOrder: new CreateProductionOrderHandler(repos.workOrder, repos.masterData, uow),
+      releaseProductionOrder: new ReleaseProductionOrderHandler(repos.workOrder, uow),
+      startProductionOperation: new StartProductionOperationHandler(repos.workOrder),
+      completeProductionOperation: new CompleteProductionOperationHandler(repos.workOrder),
+      closeProductionOrder: new CloseProductionOrderHandler(repos.workOrder),
       getWorkOrderById: new GetWorkOrderByIdHandler(repos.workOrder),
       listWorkOrders: new ListWorkOrdersHandler(repos.workOrder),
     },
     procurement: {
       createPurchaseRequisition: new CreatePurchaseRequisitionHandler(repos.procurement),
-      approvePurchaseRequisition: new ApprovePurchaseRequisitionHandler(repos.procurement),
+      approvePurchaseRequisition: new ApprovePurchaseRequisitionHandler(repos.procurement, repos.workflow, uow),
       listPurchaseOrders: new ListPurchaseOrdersHandler(repos.procurement),
       listPurchaseRequisitions: new ListPurchaseRequisitionsHandler(repos.procurement),
     },

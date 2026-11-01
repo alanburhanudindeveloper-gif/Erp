@@ -353,6 +353,7 @@ const getInitialState = (): ErpState => {
     purchaseRequisitions: [],
     purchaseOrders: [],
     goodsReceiptNotes: [],
+    productionOrders: [],
     featureRegistry: Array.isArray(legacyState.featureRegistry) && legacyState.featureRegistry.length ? legacyState.featureRegistry : baseState.featureRegistry,
     customFields: Array.isArray(legacyState.customFields) && legacyState.customFields.length ? legacyState.customFields : baseState.customFields,
     workflows: Array.isArray(legacyState.workflows) && legacyState.workflows.length ? legacyState.workflows : baseState.workflows,

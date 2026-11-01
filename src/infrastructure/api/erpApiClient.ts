@@ -198,6 +198,102 @@ export class ErpApiClient {
         `/api/erp/production-orders${qs ? `?${qs}` : ''}`
       );
     },
+
+    getWorkOrder: (id: string): Promise<ProductionOrder> => {
+      return this.request<ProductionOrder>(`/api/erp/production-orders/${encodeURIComponent(id)}`);
+    },
+
+    createProductionOrder: (data: {
+      productId: string;
+      quantity: number;
+      dueDate: string;
+      plantId?: string;
+      actorName?: string;
+    }): Promise<ProductionOrder> => {
+      return this.request<ProductionOrder>('/api/erp/production-orders', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    },
+
+    releaseWorkOrder: (
+      id: string,
+      overrideReason?: string,
+      actor: { actorName?: string; actorRole?: string } = {}
+    ): Promise<ProductionOrder> => {
+      return this.request<ProductionOrder>(`/api/erp/production-orders/${encodeURIComponent(id)}/release`, {
+        method: 'POST',
+        body: JSON.stringify({
+          overrideReason,
+          actorName: actor.actorName,
+          actorRole: actor.actorRole,
+        }),
+      });
+    },
+
+    startOperation: (
+      orderId: string,
+      operationSequence: number,
+      operatorName: string
+    ): Promise<ProductionOrder> => {
+      return this.request<ProductionOrder>(
+        `/api/erp/production-orders/${encodeURIComponent(orderId)}/operations/${operationSequence}/start`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ operatorName }),
+        }
+      );
+    },
+
+    completeOperation: (
+      orderId: string,
+      operationSequence: number,
+      actor: { actorName?: string; actorRole?: string } = {}
+    ): Promise<ProductionOrder> => {
+      return this.request<ProductionOrder>(
+        `/api/erp/production-orders/${encodeURIComponent(orderId)}/operations/${operationSequence}/complete`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            actorName: actor.actorName,
+            actorRole: actor.actorRole,
+          }),
+        }
+      );
+    },
+
+    closeWorkOrder: (
+      orderId: string,
+      actor: { actorName?: string; actorRole?: string } = {}
+    ): Promise<ProductionOrder> => {
+      return this.request<ProductionOrder>(`/api/erp/production-orders/${encodeURIComponent(orderId)}/close`, {
+        method: 'POST',
+        body: JSON.stringify({
+          actorName: actor.actorName,
+          actorRole: actor.actorRole,
+        }),
+      });
+    },
+
+    planWorkOrder: (
+      orderId: string,
+      payload: { bom: unknown; routing: unknown; actor?: string; role?: string }
+    ): Promise<ProductionOrder> => {
+      return this.request<ProductionOrder>(`/api/erp/production-orders/${encodeURIComponent(orderId)}/plan`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+
+    cancelWorkOrder: (
+      orderId: string,
+      payload: { reason: string; actor?: string; role?: string }
+    ): Promise<ProductionOrder> => {
+      return this.request<ProductionOrder>(`/api/erp/production-orders/${encodeURIComponent(orderId)}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
   };
 }
 

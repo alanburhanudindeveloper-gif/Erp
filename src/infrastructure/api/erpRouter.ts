@@ -137,7 +137,7 @@ erpRouter.get(
 ------------------------------------------------------------- */
 erpRouter.get(
   '/production-orders',
-  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Plant Manager'] }),
+  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Plant Manager', 'Production Manager', 'Operator', 'Quality Lead'] }),
   (req, res) => {
     const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
@@ -163,9 +163,127 @@ erpRouter.get(
   }
 );
 
+erpRouter.get(
+  '/production-orders/:id',
+  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Plant Manager', 'Production Manager', 'Operator', 'Quality Lead'] }),
+  (req, res) => {
+    const result = erpApplication.manufacturing.getWorkOrderById.execute({ orderId: req.params.id });
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(404).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.post(
+  '/production-orders',
+  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Plant Manager', 'Production Manager'] }),
+  (req, res) => {
+    const { productId, quantity, dueDate, plantId, actorName } = req.body;
+    const session = (req as any).session;
+    const result = erpApplication.manufacturing.createProductionOrder.execute({
+      productId,
+      quantity,
+      dueDate,
+      plantId,
+      actorName: actorName || session?.userId || 'Production Planner',
+    });
+    if (result.isSuccess) {
+      res.status(201).json(result.value);
+    } else {
+      res.status(400).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.post(
+  '/production-orders/:id/release',
+  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Plant Manager', 'Production Manager'] }),
+  (req, res) => {
+    const orderId = req.params.id;
+    const { actorName, actorRole, overrideReason } = req.body;
+    const session = (req as any).session;
+    const result = erpApplication.manufacturing.releaseProductionOrder.execute({
+      orderId,
+      actorName: actorName || session?.userId || 'Supervisor',
+      actorRole: actorRole || session?.role || 'Supervisor',
+      overrideReason,
+    });
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(400).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.post(
+  '/production-orders/:id/operations/:seq/start',
+  requireErpAuth({ requiredRoles: ['Supervisor', 'Operator', 'Plant Manager', 'Production Manager'] }),
+  (req, res) => {
+    const orderId = req.params.id;
+    const sequence = parseInt(req.params.seq, 10);
+    const { operatorName } = req.body;
+    const session = (req as any).session;
+    const result = erpApplication.manufacturing.startProductionOperation.execute({
+      orderId,
+      operationSequence: sequence,
+      operatorName: operatorName || session?.userId || 'Operator',
+    });
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(400).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.post(
+  '/production-orders/:id/operations/:seq/complete',
+  requireErpAuth({ requiredRoles: ['Supervisor', 'Operator', 'Plant Manager', 'Production Manager'] }),
+  (req, res) => {
+    const orderId = req.params.id;
+    const sequence = parseInt(req.params.seq, 10);
+    const { actorName, actorRole } = req.body;
+    const session = (req as any).session;
+    const result = erpApplication.manufacturing.completeProductionOperation.execute({
+      orderId,
+      operationSequence: sequence,
+      actorName: actorName || session?.userId || 'Operator',
+      actorRole: actorRole || session?.role || 'Operator',
+    });
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(400).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.post(
+  '/production-orders/:id/close',
+  requireErpAuth({ requiredRoles: ['Supervisor', 'Plant Manager', 'Production Manager'] }),
+  (req, res) => {
+    const orderId = req.params.id;
+    const { actorName, actorRole } = req.body;
+    const session = (req as any).session;
+    const result = erpApplication.manufacturing.closeProductionOrder.execute({
+      orderId,
+      actorName: actorName || session?.userId || 'Plant Manager',
+      actorRole: actorRole || session?.role || 'Plant Manager',
+    });
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(400).json({ error: result.error.message });
+    }
+  }
+);
+
 erpRouter.post(
   '/production-orders/:id/plan',
-  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Plant Manager'] }),
+  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Plant Manager', 'Production Manager'] }),
   (req, res) => {
     const orderId = req.params.id;
     const { bom, routing, actor, role } = req.body;
@@ -189,7 +307,7 @@ erpRouter.post(
 
 erpRouter.post(
   '/production-orders/:id/cancel',
-  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Plant Manager'] }),
+  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Plant Manager', 'Production Manager'] }),
   (req, res) => {
     const orderId = req.params.id;
     const { reason, actor, role } = req.body;

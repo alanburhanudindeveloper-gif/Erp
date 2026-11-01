@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { ProductionOrder, ProductionOrderStatus } from '../../../../types';
-import { erpApplication } from '../../../../app/composition/dependencies';
+import { erpApiClient } from '../../../../infrastructure/api/erpApiClient';
 
 export interface UseWorkOrdersOptions {
   page?: number;
@@ -24,18 +24,18 @@ export function useWorkOrders(options: UseWorkOrdersOptions = {}) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchOrders = useCallback(() => {
+  const fetchOrders = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = erpApplication.manufacturing.listWorkOrders.execute({
+      const result = await erpApiClient.manufacturing.listWorkOrders({
         page,
         limit,
         status,
         sku,
         plantId,
       });
-      setOrders(result.items);
+      setOrders(result.orders);
       setTotal(result.total);
       setTotalPages(result.totalPages);
     } catch (err: unknown) {

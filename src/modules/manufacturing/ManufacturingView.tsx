@@ -19,6 +19,14 @@ import { SubcontractingView } from './SubcontractingView';
 import { ProductionTravelerModal } from './ProductionTravelerModal';
 import { MaterialRequestView } from './MaterialRequestView';
 import {
+  useWorkOrders,
+  useReleaseWorkOrder,
+  useStartOperation,
+  useCompleteOperation,
+  useCloseWorkOrder,
+  useCreateWorkOrder,
+} from './presentation/hooks';
+import {
   EnterpriseDataGrid,
   GridColumn,
   createTextColumn,
@@ -60,7 +68,7 @@ interface ManufacturingViewProps {
 }
 
 export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
-  orders,
+  orders: propOrders,
   products,
   workCenters,
   reasonCodes,
@@ -79,6 +87,70 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
   onCreateSubcontractOrder,
   onReceiveSubcontractOrder,
 }) => {
+  // Authoritative server-managed state via CQRS hooks
+  const {
+    orders: serverOrders,
+    refresh: refreshOrders,
+  } = useWorkOrders();
+
+  const { releaseOrder: serverReleaseOrder } = useReleaseWorkOrder();
+  const { startOp: serverStartOperation } = useStartOperation();
+  const { completeOp: serverCompleteOperation } = useCompleteOperation();
+  const { closeOrder: serverCloseOrder } = useCloseWorkOrder();
+  const { createOrder: serverCreateOrder } = useCreateWorkOrder();
+
+  const orders = serverOrders && serverOrders.length > 0 ? serverOrders : propOrders;
+
+  const handleReleaseOrder = async (orderId: string) => {
+    try {
+      await serverReleaseOrder(orderId);
+      await refreshOrders();
+    } catch {
+      // ignore
+    }
+    onReleaseOrder(orderId);
+  };
+
+  const handleStartOperation = async (orderId: string, seq: number, operator: string) => {
+    try {
+      await serverStartOperation(orderId, seq, operator);
+      await refreshOrders();
+    } catch {
+      // ignore
+    }
+    onStartOperation(orderId, seq, operator);
+  };
+
+  const handleCompleteOperation = async (orderId: string, seq: number) => {
+    try {
+      await serverCompleteOperation(orderId, seq);
+      await refreshOrders();
+    } catch {
+      // ignore
+    }
+    onCompleteOperation(orderId, seq);
+  };
+
+  const handleCloseOrder = async (orderId: string) => {
+    try {
+      await serverCloseOrder(orderId);
+      await refreshOrders();
+    } catch {
+      // ignore
+    }
+    onCloseOrder(orderId);
+  };
+
+  const handleCreateOrder = async (data: { productId: string; quantity: number; dueDate: string }) => {
+    try {
+      await serverCreateOrder(data);
+      await refreshOrders();
+    } catch {
+      // ignore
+    }
+    onCreateOrder(data);
+  };
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [travelerOrder, setTravelerOrder] = useState<ProductionOrder | null>(null);
   const [newOrderProduct, setNewOrderProduct] = useState(products[0]?.id || '');
@@ -93,11 +165,11 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
       <ProductionOrderDetail
         order={selectedOrder}
         onBack={() => onSelectOrder('')}
-        onReleaseOrder={onReleaseOrder}
-        onStartOperation={onStartOperation}
+        onReleaseOrder={handleReleaseOrder}
+        onStartOperation={handleStartOperation}
         onReportOutput={onReportOutput}
-        onCompleteOperation={onCompleteOperation}
-        onCloseOrder={onCloseOrder}
+        onCompleteOperation={handleCompleteOperation}
+        onCloseOrder={handleCloseOrder}
         reasonCodes={reasonCodes}
       />
     );
@@ -169,10 +241,10 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
         workCenters={workCenters}
         orders={orders}
         reasonCodes={reasonCodes}
-        onStartOp={onStartOperation}
+        onStartOp={handleStartOperation}
         onLogOutput={onReportOutput}
-        onCompleteOp={onCompleteOperation}
-        onReleaseOrder={onReleaseOrder}
+        onCompleteOp={handleCompleteOperation}
+        onReleaseOrder={handleReleaseOrder}
         onSelectOrder={onSelectOrder}
       />
     );
@@ -488,7 +560,7 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onReleaseOrder(row.id);
+              handleReleaseOrder(row.id);
             }}
             className="px-2 py-0.5 text-[11px] font-semibold text-white bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 rounded transition-colors"
             title="Release to Shop Floor (Allocates & Hard Reserves Materials)"
@@ -532,7 +604,7 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
           alert('Selected orders are already released or completed.');
           return;
         }
-        plannedOrders.forEach((o) => onReleaseOrder(o.id));
+        plannedOrders.forEach((o) => handleReleaseOrder(o.id));
       },
     },
   ];
@@ -733,7 +805,7 @@ export const ManufacturingView: React.FC<ManufacturingViewProps> = ({
               </button>
               <button
                 onClick={() => {
-                  onCreateOrder({
+                  handleCreateOrder({
                     productId: newOrderProduct,
                     quantity: newOrderQty,
                     dueDate: newOrderDueDate,

@@ -4,13 +4,14 @@ import type {
   ApprovalTransactionRequest,
 } from '../../types';
 import { createErpCollectionRepository, type ErpCollectionRepository } from '../../infrastructure/database/repositories/erpCollectionRepository';
+import type { ITransactionalParticipant } from '../../shared/kernel/unitOfWork';
 import {
   INITIAL_WORKFLOWS,
   INITIAL_BUSINESS_RULES,
   INITIAL_APPROVAL_REQUESTS,
 } from '../../lib/mockData';
 
-export interface IWorkflowRepository {
+export interface IWorkflowRepository extends ITransactionalParticipant {
   listWorkflows(): WorkflowDefinition[];
   findWorkflowById(id: string): WorkflowDefinition | undefined;
   saveWorkflow(workflow: WorkflowDefinition): WorkflowDefinition;
@@ -22,6 +23,9 @@ export interface IWorkflowRepository {
   listApprovalRequests(): ApprovalTransactionRequest[];
   findApprovalRequestById(id: string): ApprovalTransactionRequest | undefined;
   saveApprovalRequest(req: ApprovalTransactionRequest): ApprovalTransactionRequest;
+
+  createSnapshot(): unknown;
+  restoreSnapshot(snapshot: unknown): void;
 }
 
 export function createWorkflowRepository(
@@ -56,5 +60,24 @@ export function createWorkflowRepository(
     listApprovalRequests: () => requestCollection.list(),
     findApprovalRequestById: (id: string) => requestCollection.get(id),
     saveApprovalRequest: (req: ApprovalTransactionRequest) => requestCollection.upsert(req, 'id'),
+
+    createSnapshot: () => ({
+      workflows: workflowCollection.createSnapshot(),
+      rules: ruleCollection.createSnapshot(),
+      requests: requestCollection.createSnapshot(),
+    }),
+
+    restoreSnapshot: (snapshot: unknown) => {
+      if (snapshot && typeof snapshot === 'object') {
+        const snap = snapshot as {
+          workflows?: WorkflowDefinition[];
+          rules?: BusinessRule[];
+          requests?: ApprovalTransactionRequest[];
+        };
+        if (snap.workflows) workflowCollection.restoreSnapshot(snap.workflows);
+        if (snap.rules) ruleCollection.restoreSnapshot(snap.rules);
+        if (snap.requests) requestCollection.restoreSnapshot(snap.requests);
+      }
+    },
   };
 }

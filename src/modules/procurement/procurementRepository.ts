@@ -1,12 +1,13 @@
 import type { PurchaseRequisition, PurchaseOrder, GoodsReceiptNote } from '../../types';
 import { createErpCollectionRepository, type ErpCollectionRepository } from '../../infrastructure/database/repositories/erpCollectionRepository';
+import type { ITransactionalParticipant } from '../../shared/kernel/unitOfWork';
 import {
   INITIAL_PURCHASE_REQUISITIONS,
   INITIAL_PURCHASE_ORDERS,
   INITIAL_GOODS_RECEIPTS,
 } from '../../lib/mockData';
 
-export interface IProcurementRepository {
+export interface IProcurementRepository extends ITransactionalParticipant {
   listPurchaseRequisitions(): PurchaseRequisition[];
   findPurchaseRequisitionById(id: string): PurchaseRequisition | undefined;
   savePurchaseRequisition(pr: PurchaseRequisition): PurchaseRequisition;
@@ -18,6 +19,9 @@ export interface IProcurementRepository {
   listGoodsReceipts(): GoodsReceiptNote[];
   findGoodsReceiptById(id: string): GoodsReceiptNote | undefined;
   recordGoodsReceipt(grn: GoodsReceiptNote): GoodsReceiptNote;
+
+  createSnapshot(): unknown;
+  restoreSnapshot(snapshot: unknown): void;
 }
 
 export function createProcurementRepository(
@@ -52,5 +56,24 @@ export function createProcurementRepository(
     listGoodsReceipts: () => grnCollection.list(),
     findGoodsReceiptById: (id: string) => grnCollection.get(id),
     recordGoodsReceipt: (grn: GoodsReceiptNote) => grnCollection.upsert(grn, 'id'),
+
+    createSnapshot: () => ({
+      prs: prCollection.createSnapshot(),
+      pos: poCollection.createSnapshot(),
+      grns: grnCollection.createSnapshot(),
+    }),
+
+    restoreSnapshot: (snapshot: unknown) => {
+      if (snapshot && typeof snapshot === 'object') {
+        const snap = snapshot as {
+          prs?: PurchaseRequisition[];
+          pos?: PurchaseOrder[];
+          grns?: GoodsReceiptNote[];
+        };
+        if (snap.prs) prCollection.restoreSnapshot(snap.prs);
+        if (snap.pos) poCollection.restoreSnapshot(snap.pos);
+        if (snap.grns) grnCollection.restoreSnapshot(snap.grns);
+      }
+    },
   };
 }

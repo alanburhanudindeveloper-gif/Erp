@@ -1,13 +1,16 @@
 import { createInMemoryErpRepository, type InMemoryRecord } from './inMemoryErpRepository';
 import { assertErpSourceOfTruth } from '../persistencePolicy';
+import type { ITransactionalParticipant } from '../../../shared/kernel/unitOfWork';
 
-export interface ErpCollectionRepository<T extends object = object> {
+export interface ErpCollectionRepository<T extends object = object> extends ITransactionalParticipant {
   list(): T[];
   get(id: string): T | undefined;
   save(records: T[]): T[];
   upsert(record: T, idKey?: keyof T): T;
   remove(id: string): boolean;
   clear(): void;
+  createSnapshot(): T[];
+  restoreSnapshot(snapshot: unknown): void;
 }
 
 export function createErpCollectionRepository<T extends object>(
@@ -27,5 +30,11 @@ export function createErpCollectionRepository<T extends object>(
     upsert: (record, idKey = 'id' as keyof T) => repository.upsert(collectionName, record, idKey),
     remove: (id) => repository.remove(collectionName, id),
     clear: () => repository.clear(collectionName),
+    createSnapshot: () => repository.list(collectionName).map((record) => ({ ...(record as object) }) as T),
+    restoreSnapshot: (snapshot: unknown) => {
+      if (Array.isArray(snapshot)) {
+        repository.save(collectionName, snapshot as T[]);
+      }
+    },
   };
 }

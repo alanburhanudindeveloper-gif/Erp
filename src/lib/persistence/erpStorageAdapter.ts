@@ -48,6 +48,7 @@ export function loadLegacyErpState(): Record<string, unknown> | null {
     delete parsed.purchaseRequisitions;
     delete parsed.purchaseOrders;
     delete parsed.goodsReceiptNotes;
+    delete parsed.productionOrders;
 
     legacyStateRepository.save('legacy_state', [{ id: 'snapshot', value: parsed } as Record<string, unknown> & { id: string }]);
     return parsed;
@@ -58,6 +59,7 @@ export function loadLegacyErpState(): Record<string, unknown> | null {
       delete val.purchaseRequisitions;
       delete val.purchaseOrders;
       delete val.goodsReceiptNotes;
+      delete val.productionOrders;
       return val;
     }
     return null;
@@ -76,6 +78,7 @@ export function saveLegacyErpState(state: Record<string, unknown>): void {
     delete sanitizedState.purchaseRequisitions;
     delete sanitizedState.purchaseOrders;
     delete sanitizedState.goodsReceiptNotes;
+    delete sanitizedState.productionOrders;
 
     const snapshot = { id: 'snapshot', value: sanitizedState };
     legacyStateRepository.save('legacy_state', [snapshot]);

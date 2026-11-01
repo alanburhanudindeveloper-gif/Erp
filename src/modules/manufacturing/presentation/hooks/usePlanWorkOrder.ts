@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { ProductionOrder } from '../../../../types';
 import type { PlanWorkOrderCommand } from '../../application/commands/planWorkOrderCommand';
-import { erpApplication } from '../../../../app/composition/dependencies';
+import { erpApiClient } from '../../../../infrastructure/api/erpApiClient';
 
 export function usePlanWorkOrder() {
   const [isPending, setIsPending] = useState(false);
@@ -12,15 +12,14 @@ export function usePlanWorkOrder() {
     setIsPending(true);
     setError(null);
     try {
-      const outcome = erpApplication.manufacturing.planWorkOrder.execute(command);
-      if (outcome.isSuccess) {
-        setResult(outcome.value);
-        return { success: true, data: outcome.value };
-      } else {
-        const errorMsg = outcome.error.message;
-        setError(errorMsg);
-        return { success: false, error: errorMsg };
-      }
+      const updated = await erpApiClient.manufacturing.planWorkOrder(command.orderId, {
+        bom: command.bom,
+        routing: command.routing,
+        actor: command.actor,
+        role: command.role,
+      });
+      setResult(updated);
+      return { success: true, data: updated };
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown planning error';
       setError(errorMsg);

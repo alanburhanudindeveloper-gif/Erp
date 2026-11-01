@@ -32,6 +32,7 @@ test('composition root wires all CQRS application handlers without null dependen
   assert.ok(app.quality.resolveNcr, 'resolveNcr handler should be wired');
   assert.ok(app.inventory.transferStock, 'transferStock handler should be wired');
   assert.ok(app.inventory.get5BucketBalance, 'get5BucketBalance handler should be wired');
+  assert.ok(app.unitOfWork, 'unitOfWork transaction boundary should be wired');
 
   // Verify singleton export
   assert.ok(erpApplication.manufacturing.planWorkOrder);
