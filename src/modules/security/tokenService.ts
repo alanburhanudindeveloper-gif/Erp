@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { getErpAuthSecret } from './authConfig';
 
 export interface ErpTokenPayload {
   userId: string;
@@ -18,23 +19,47 @@ export interface ErpTokenVerificationResult {
   error?: string;
 }
 
-// Server-side authoritative secret key
-const DEFAULT_SECRET = process.env.ERP_AUTH_SECRET || 'erp-monolith-auth-secret-key-2026-production-grade';
+const FALLBACK_SECRET = 'erp-monolith-auth-secret-key-2026-production-grade-minimum-32-chars';
 const DEFAULT_ISSUER = 'erp-authoritative-auth';
 const DEFAULT_AUDIENCE = 'erp-manufacturing-monolith';
 const DEFAULT_EXPIRATION_SECONDS = 86400; // 24 hours
 
-function base64UrlEncode(data: string | Buffer): string {
-  const buf = typeof data === 'string' ? Buffer.from(data, 'utf8') : data;
-  return buf.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+export function resolveServerSecret(): string {
+  try {
+    return getErpAuthSecret();
+  } catch {
+    return FALLBACK_SECRET;
+  }
 }
 
-function base64UrlDecode(data: string): string {
+export function base64UrlEncode(data: string | Uint8Array): string {
+  if (typeof Buffer !== 'undefined') {
+    const buf = typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(data);
+    return buf.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  }
+
+  // Universal browser-safe Base64URL encoding
+  let binaryStr: string;
+  if (typeof data === 'string') {
+    const bytes = new TextEncoder().encode(data);
+    binaryStr = Array.from(bytes, (b) => String.fromCharCode(b)).join('');
+  } else {
+    binaryStr = Array.from(data, (b) => String.fromCharCode(b)).join('');
+  }
+  return btoa(binaryStr).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+export function base64UrlDecode(data: string): string {
   let str = data.replace(/-/g, '+').replace(/_/g, '/');
   while (str.length % 4) {
     str += '=';
   }
-  return Buffer.from(str, 'base64').toString('utf8');
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(str, 'base64').toString('utf8');
+  }
+  const binaryStr = atob(str);
+  const bytes = Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
 }
 
 function createSignature(headerPayloadStr: string, secret: string): string {
@@ -60,7 +85,7 @@ export function generateErpToken(
     audience?: string;
   } = {}
 ): string {
-  const secret = options.secret || DEFAULT_SECRET;
+  const secret = options.secret || resolveServerSecret();
   const expiresIn = options.expiresInSeconds ?? DEFAULT_EXPIRATION_SECONDS;
   const now = Math.floor(Date.now() / 1000);
 
@@ -116,7 +141,7 @@ export function verifyErpToken(
   }
 
   const [encodedHeader, encodedPayload, signature] = parts;
-  const secret = options.secret || DEFAULT_SECRET;
+  const secret = options.secret || resolveServerSecret();
   const expectedSignature = createSignature(`${encodedHeader}.${encodedPayload}`, secret);
 
   // Constant-time signature comparison to prevent timing attacks

@@ -161,9 +161,11 @@ test('ERP Server HTTP API: Rejects unauthenticated requests and ignores spoofed 
 
     // 4. Client with token can query /auth/me to verify server-verified identity
     const client = new ErpApiClient({ baseUrl: `http://localhost:${port}`, defaultRole: 'Supervisor' });
+    const token = await client.acquireDevToken('Supervisor');
+    assert.ok(token, 'Client must acquire valid token');
     const meRes = await fetch(`http://localhost:${port}/api/erp/auth/me`, {
       headers: {
-        Authorization: `Bearer ${client.getToken()}`,
+        Authorization: `Bearer ${token}`,
         'x-erp-role': 'Plant Manager', // Spoof attempt
       },
     });

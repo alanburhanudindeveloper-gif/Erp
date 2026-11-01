@@ -2,13 +2,13 @@
  * Authoritative ERP Typed API Client.
  *
  * Centralizes HTTP requests from presentation hooks to backend Express CQRS routes.
- * Employs cryptographically signed Bearer authentication tokens for verified server-side identity.
+ * Operates across the network using cryptographically signed Bearer authentication tokens.
+ * Sourced cleanly for browser environments without importing Node.js server dependencies.
  */
 
 import type { PurchaseOrder, PurchaseRequisition, PurchaseOrderStatus, PurchaseRequisitionStatus, ProductionOrder } from '../../types';
 import type { CreatePurchaseRequisitionCommand } from '../../modules/procurement/application/commands/createPurchaseRequisitionCommand';
 import type { PaginatedResult } from '../../shared/kernel/pagination';
-import { createDevToken } from '../../modules/security/tokenService';
 
 export interface ApiClientConfig {
   baseUrl?: string;
@@ -20,16 +20,19 @@ export class ErpApiClient {
   private baseUrl: string;
   private currentRole: string;
   private token: string | null = null;
+  private tokenPromise: Promise<string | null> | null = null;
 
   constructor(config: ApiClientConfig = {}) {
     this.baseUrl = config.baseUrl ?? '';
     this.currentRole = config.defaultRole ?? 'Planner';
-    this.token = config.token ?? createDevToken(this.currentRole);
+    this.token = config.token ?? null;
   }
 
-  setRole(role: string, userId?: string, orgId?: string): void {
-    this.currentRole = role;
-    this.token = createDevToken(role, userId, orgId);
+  setRole(role: string): void {
+    if (this.currentRole !== role) {
+      this.currentRole = role;
+      this.token = null;
+    }
   }
 
   getRole(): string {
@@ -44,6 +47,41 @@ export class ErpApiClient {
     return this.token;
   }
 
+  /**
+   * Securely acquires a signed development Bearer token from the server auth endpoint.
+   */
+  async acquireDevToken(role = this.currentRole): Promise<string | null> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/erp/auth/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data && typeof data.token === 'string') {
+          this.token = data.token;
+          return this.token;
+        }
+      }
+    } catch {
+      // Offline fallback
+    }
+    return null;
+  }
+
+  private async ensureToken(): Promise<string | null> {
+    if (this.token) {
+      return this.token;
+    }
+    if (!this.tokenPromise) {
+      this.tokenPromise = this.acquireDevToken(this.currentRole).finally(() => {
+        this.tokenPromise = null;
+      });
+    }
+    return this.tokenPromise;
+  }
+
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
     const headers = new Headers(options.headers || {});
@@ -52,8 +90,11 @@ export class ErpApiClient {
       headers.set('Content-Type', 'application/json');
     }
 
-    if (this.token && !headers.has('Authorization')) {
-      headers.set('Authorization', `Bearer ${this.token}`);
+    if (!headers.has('Authorization')) {
+      const token = await this.ensureToken();
+      if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+      }
     }
 
     const response = await fetch(url, {
