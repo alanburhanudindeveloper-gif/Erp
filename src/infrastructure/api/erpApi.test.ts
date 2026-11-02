@@ -207,7 +207,7 @@ test('ERP Server API End-to-End: Manufacturing Work Order CQRS Lifecycle & Autho
       async () => {
         await viewerClient.manufacturing.releaseWorkOrder(createdOrder.id);
       },
-      /FORBIDDEN|Access denied/i,
+      /is not allowed|FORBIDDEN|Access denied/i,
       'Viewer role must not be permitted to release work orders'
     );
   } finally {
@@ -266,4 +266,104 @@ test('ERP Server HTTP API: Rejects unauthenticated requests and ignores spoofed 
   } finally {
     await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   }
+});
+
+test('ERP Server HTTP API: Material Requests End-to-End CQRS & Lifecycle', async () => {
+  const testApp = express();
+  testApp.use(express.json());
+  testApp.use('/api/erp', erpRouter);
+
+  const server = http.createServer(testApp);
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const port = address.port;
+
+  const supervisorClient = new ErpApiClient({ baseUrl: `http://localhost:${port}`, defaultRole: 'Supervisor' });
+
+  try {
+    // 1. Create a Material Request
+    const createdMR = await supervisorClient.manufacturing.createMaterialRequest({
+      sourceType: 'PRODUCTION_ORDER',
+      sourceReferenceId: 'MO-2026-TEST-MR',
+      productSku: 'PROD-FG-99',
+      requester: 'Supervisor Jane',
+      destinationLine: 'Cell 3 - Staging Bay',
+      priority: 'HIGH',
+      items: [
+        {
+          sku: 'RAW-ALUM-01',
+          name: 'Aluminum Bar Stock',
+          requestedQuantity: 80,
+          uom: 'KG',
+          fromWarehouse: 'WH-MAIN-A1',
+        },
+      ],
+    });
+
+    assert.ok(createdMR.id);
+    assert.equal(createdMR.status, 'SUBMITTED');
+    assert.equal(createdMR.items.length, 1);
+    assert.equal(createdMR.items[0].requestedQuantity, 80);
+
+    // 2. Query Material Requests
+    const listing = await supervisorClient.manufacturing.listMaterialRequests({
+      sourceType: 'PRODUCTION_ORDER',
+    });
+    assert.ok(listing.requests.length >= 1);
+    const found = listing.requests.find((r) => r.id === createdMR.id);
+    assert.ok(found);
+    assert.equal(found?.destinationLine, 'Cell 3 - Staging Bay');
+
+    // 3. Pick Material Request
+    const pickedMR = await supervisorClient.manufacturing.pickMaterialRequest(createdMR.id, {
+      pickedBy: 'Warehouse Tech John',
+    });
+    assert.equal(pickedMR.status, 'READY');
+    assert.equal(pickedMR.items[0].pickedQuantity, 80);
+
+    // 4. Deliver Material Request to Line
+    const deliveredMR = await supervisorClient.manufacturing.deliverMaterialRequest(createdMR.id, {
+      deliveredBy: 'Logistics Courier Mike',
+      destinationLine: 'Cell 3 - Staging Bay',
+    });
+    assert.equal(deliveredMR.status, 'DELIVERED');
+    assert.equal(deliveredMR.deliveredBy, 'Logistics Courier Mike');
+    assert.equal(deliveredMR.items[0].deliveredQuantity, 80);
+
+    // 5. RBAC check: Unauthorized role (Viewer) cannot create a Material Request
+    const viewerClient = new ErpApiClient({ baseUrl: `http://localhost:${port}`, defaultRole: 'Viewer' });
+    await assert.rejects(
+      async () => {
+        await viewerClient.manufacturing.createMaterialRequest({
+          sourceType: 'PRODUCTION_ORDER',
+          sourceReferenceId: 'MO-ILLEGAL',
+          destinationLine: 'Cell 1',
+          items: [{ sku: 'RAW-01', name: 'Raw', requestedQuantity: 10, uom: 'PCS' }],
+        });
+      },
+      /is not allowed|FORBIDDEN|Access denied/i,
+      'Viewer role must not be permitted to create material requests'
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  }
+});
+
+test('ERP Storage Adapter: Authoritative Material Requests and Production Orders are sanitized from localStorage', () => {
+  const dummyState = {
+    productionOrders: [{ id: 'mo-local-fake', orderNumber: 'MO-FAKE' }],
+    materialRequests: [{ id: 'mr-local-fake', requestNumber: 'MR-FAKE' }],
+    purchaseRequisitions: [{ id: 'pr-local-fake', prNumber: 'PR-FAKE' }],
+    otherField: 'preserved_value',
+  };
+
+  saveLegacyErpState(dummyState);
+  const loaded = loadLegacyErpState();
+
+  assert.ok(loaded);
+  assert.equal((loaded as any).otherField, 'preserved_value');
+  assert.equal((loaded as any).productionOrders, undefined, 'productionOrders must be stripped from local storage');
+  assert.equal((loaded as any).materialRequests, undefined, 'materialRequests must be stripped from local storage');
+  assert.equal((loaded as any).purchaseRequisitions, undefined, 'purchaseRequisitions must be stripped from local storage');
 });

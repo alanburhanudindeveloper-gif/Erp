@@ -26,6 +26,11 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
+import { erpRouter } from './src/infrastructure/api/erpRouter.ts';
+
+// Authoritative ERP CQRS & Repository Routes
+app.use('/api/erp', erpRouter);
+
 app.get('/api/erp/health', (_req, res) => {
   res.json({
     ok: true,
@@ -41,10 +46,6 @@ app.get('/api/erp/dashboard', requireErpAuth({ requiredRoles: ['Planner', 'Super
 
 app.get('/api/erp/inventory', requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Quality Lead'] }), (_req, res) => {
   res.json({ items: getInventoryOverview() });
-});
-
-app.get('/api/erp/production-orders', requireErpAuth({ requiredRoles: ['Planner', 'Supervisor'] }), (_req, res) => {
-  res.json({ orders: getProductionOrderOverview() });
 });
 
 app.get('/api/erp/capacity', requireErpAuth({ requiredRoles: ['Planner', 'Supervisor'] }), (_req, res) => {
@@ -76,11 +77,6 @@ app.get('/api/erp/bom-explosion', requireErpAuth({ requiredRoles: ['Planner', 'S
   const quantity = req.query.quantity ? parseInt(req.query.quantity as string, 10) : 100;
   res.json({ explosion: getBomExplosionOverview(productId, isNaN(quantity) ? 100 : quantity) });
 });
-
-import { erpRouter } from './src/infrastructure/api/erpRouter.ts';
-
-// Authoritative ERP CQRS & Repository Routes
-app.use('/api/erp', erpRouter);
 
 import { aiTelemetryService } from './src/infrastructure/ai/aiTelemetryService.ts';
 import { aiGatewayAdapter } from './src/infrastructure/ai/aiGatewayAdapter.ts';

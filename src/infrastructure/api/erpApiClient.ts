@@ -6,7 +6,7 @@
  * Sourced cleanly for browser environments without importing Node.js server dependencies.
  */
 
-import type { PurchaseOrder, PurchaseRequisition, PurchaseOrderStatus, PurchaseRequisitionStatus, ProductionOrder } from '../../types';
+import type { PurchaseOrder, PurchaseRequisition, PurchaseOrderStatus, PurchaseRequisitionStatus, ProductionOrder, MaterialRequest } from '../../types';
 import type { CreatePurchaseRequisitionCommand } from '../../modules/procurement/application/commands/createPurchaseRequisitionCommand';
 import type { PaginatedResult } from '../../shared/kernel/pagination';
 
@@ -290,6 +290,89 @@ export class ErpApiClient {
       payload: { reason: string; actor?: string; role?: string }
     ): Promise<ProductionOrder> => {
       return this.request<ProductionOrder>(`/api/erp/production-orders/${encodeURIComponent(orderId)}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+
+    listMaterialRequests: (params: {
+      page?: number;
+      limit?: number;
+      sourceType?: string;
+      status?: string;
+      destinationLine?: string;
+    } = {}): Promise<{
+      requests: MaterialRequest[];
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+    }> => {
+      const search = new URLSearchParams();
+      if (params.page) search.set('page', String(params.page));
+      if (params.limit) search.set('limit', String(params.limit));
+      if (params.sourceType) search.set('sourceType', params.sourceType);
+      if (params.status) search.set('status', params.status);
+      if (params.destinationLine) search.set('destinationLine', params.destinationLine);
+
+      const qs = search.toString();
+      return this.request<{
+        requests: MaterialRequest[];
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+      }>(`/api/erp/material-requests${qs ? `?${qs}` : ''}`);
+    },
+
+    getMaterialRequest: (id: string): Promise<MaterialRequest> => {
+      return this.request<MaterialRequest>(`/api/erp/material-requests/${encodeURIComponent(id)}`);
+    },
+
+    createMaterialRequest: (payload: {
+      sourceType: MaterialRequest['sourceType'];
+      sourceReferenceId: string;
+      productSku?: string;
+      requester?: string;
+      department?: string;
+      requiredDate?: string;
+      destinationLine: string;
+      priority?: MaterialRequest['priority'];
+      items: Array<{
+        productId?: string;
+        sku: string;
+        name: string;
+        requestedQuantity: number;
+        pickedQuantity?: number;
+        deliveredQuantity?: number;
+        uom: string;
+        fromWarehouse?: string;
+        toLocation?: string;
+        status?: string;
+      }>;
+      notes?: string;
+    }): Promise<MaterialRequest> => {
+      return this.request<MaterialRequest>('/api/erp/material-requests', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+
+    pickMaterialRequest: (
+      id: string,
+      payload: { pickedBy?: string; pickedAt?: string } = {}
+    ): Promise<MaterialRequest> => {
+      return this.request<MaterialRequest>(`/api/erp/material-requests/${encodeURIComponent(id)}/pick`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+
+    deliverMaterialRequest: (
+      id: string,
+      payload: { deliveredBy?: string; destinationLine?: string; deliveredAt?: string } = {}
+    ): Promise<MaterialRequest> => {
+      return this.request<MaterialRequest>(`/api/erp/material-requests/${encodeURIComponent(id)}/deliver`, {
         method: 'POST',
         body: JSON.stringify(payload),
       });

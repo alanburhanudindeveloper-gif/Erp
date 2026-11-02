@@ -188,23 +188,11 @@ export function authorizeRequest(
         permissions: verification.payload.permissions || [],
       });
     } else {
-      // Compatibility fallback ONLY if caller explicitly passed a pre-formed test session or role header in isolated unit tests
-      const legacyRole = readHeaderValue(request.headers, 'x-erp-role') || readHeaderValue(request.headers, 'X-Erp-Role');
-      if (legacyRole && !request.headers?.authorization) {
-        // Documented unit-testing compatibility path for direct function callers
-        candidateSession = validateErpSession({
-          userId: 'legacy-test-user',
-          role: normalizeRole(legacyRole),
-          organizationId: 'default-org',
-          permissions: [],
-        });
-      } else {
-        return {
-          authorized: false,
-          code: 'MISSING_TOKEN',
-          reason: 'Missing authentication credentials (Bearer token required).',
-        };
-      }
+      return {
+        authorized: false,
+        code: 'MISSING_TOKEN',
+        reason: 'Missing authentication credentials (Bearer token required).',
+      };
     }
   }
 

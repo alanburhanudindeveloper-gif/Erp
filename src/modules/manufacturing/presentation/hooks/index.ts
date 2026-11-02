@@ -6,3 +6,7 @@ export * from './useStartOperation';
 export * from './useCompleteOperation';
 export * from './useCloseWorkOrder';
 export * from './useCreateWorkOrder';
+export * from './useMaterialRequests';
+export * from './useCreateMaterialRequest';
+export * from './usePickMaterialRequest';
+export * from './useDeliverMaterialRequest';

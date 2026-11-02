@@ -326,6 +326,121 @@ erpRouter.post(
 );
 
 /* -------------------------------------------------------------
+   MANUFACTURING: MATERIAL REQUESTS (Authoritative Server State)
+------------------------------------------------------------- */
+erpRouter.get(
+  '/material-requests',
+  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Plant Manager', 'Production Manager', 'Operator', 'Quality Lead'] }),
+  (req, res) => {
+    const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+    const sourceType = req.query.sourceType as string | undefined;
+    const status = req.query.status as string | undefined;
+    const destinationLine = req.query.destinationLine as string | undefined;
+
+    const result = erpApplication.manufacturing.listMaterialRequests.execute({
+      page,
+      limit,
+      sourceType,
+      status,
+      destinationLine,
+    });
+
+    res.json({
+      requests: result.items,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+    });
+  }
+);
+
+erpRouter.get(
+  '/material-requests/:id',
+  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Plant Manager', 'Production Manager', 'Operator', 'Quality Lead'] }),
+  (req, res) => {
+    const result = erpApplication.manufacturing.getMaterialRequestById.execute({ id: req.params.id });
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(404).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.post(
+  '/material-requests',
+  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Plant Manager', 'Production Manager', 'Operator'] }),
+  (req, res) => {
+    const session = (req as any).session;
+    const { sourceType, sourceReferenceId, productSku, requester, department, requiredDate, destinationLine, priority, items, notes } = req.body;
+
+    const result = erpApplication.manufacturing.createMaterialRequest.execute({
+      sourceType,
+      sourceReferenceId,
+      productSku,
+      requester: requester || session?.userId || 'Shop Floor Requester',
+      department: department || 'Shop Floor Staging',
+      requiredDate: requiredDate || new Date().toISOString().split('T')[0],
+      destinationLine,
+      priority: priority || 'HIGH',
+      items,
+      notes,
+    });
+
+    if (result.isSuccess) {
+      res.status(201).json(result.value);
+    } else {
+      res.status(400).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.post(
+  '/material-requests/:id/pick',
+  requireErpAuth({ requiredRoles: ['Supervisor', 'Operator', 'Plant Manager', 'Production Manager'] }),
+  (req, res) => {
+    const session = (req as any).session;
+    const { pickedBy, pickedAt } = req.body;
+
+    const result = erpApplication.manufacturing.pickMaterialRequest.execute({
+      id: req.params.id,
+      pickedBy: pickedBy || session?.userId || 'Warehouse Operator',
+      pickedAt,
+    });
+
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(400).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.post(
+  '/material-requests/:id/deliver',
+  requireErpAuth({ requiredRoles: ['Supervisor', 'Operator', 'Plant Manager', 'Production Manager'] }),
+  (req, res) => {
+    const session = (req as any).session;
+    const { deliveredBy, destinationLine, deliveredAt } = req.body;
+
+    const result = erpApplication.manufacturing.deliverMaterialRequest.execute({
+      id: req.params.id,
+      deliveredBy: deliveredBy || session?.userId || 'Logistics Operator',
+      destinationLine,
+      deliveredAt,
+    });
+
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(400).json({ error: result.error.message });
+    }
+  }
+);
+
+/* -------------------------------------------------------------
    PROCUREMENT CQRS ROUTES (Authoritative Server State)
 ------------------------------------------------------------- */
 erpRouter.get(

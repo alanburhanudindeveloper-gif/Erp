@@ -1,46 +1,82 @@
 import React, { useState } from 'react';
-import { useErpStore } from '../../lib/services/manufacturingService';
-import { MaterialRequest, MaterialRequestItem } from '../../types';
+import type { MaterialRequest, MaterialRequestItem } from '../../types';
 import {
   Boxes,
   Truck,
   CheckCircle2,
-  Clock,
-  ArrowRight,
-  Plus,
   PackageCheck,
-  Layers,
   MapPin,
-  Barcode,
-  Building2,
+  Plus,
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
+import {
+  useMaterialRequests,
+  useCreateMaterialRequest,
+  usePickMaterialRequest,
+  useDeliverMaterialRequest,
+  useWorkOrders,
+} from './presentation/hooks';
+import { erpApiClient } from '../../infrastructure/api/erpApiClient';
 
-export const MaterialRequestView: React.FC = () => {
+interface MaterialRequestViewProps {
+  npiProjects?: Array<{
+    id: string;
+    projectNumber: string;
+    productSku: string;
+    productName: string;
+  }>;
+}
+
+const DEFAULT_NPI_PROJECTS = [
+  {
+    id: 'npi-001',
+    projectNumber: 'NPI-2026-001',
+    productSku: 'ABC-100',
+    productName: 'High Voltage Inverter Prototype',
+  },
+  {
+    id: 'npi-002',
+    projectNumber: 'NPI-2026-002',
+    productSku: 'BAT-300',
+    productName: 'Next-Gen Battery Pack Pilot',
+  },
+];
+
+export const MaterialRequestView: React.FC<MaterialRequestViewProps> = ({
+  npiProjects = DEFAULT_NPI_PROJECTS,
+}) => {
+  // Authoritative server-managed CQRS state via presentation hooks
   const {
-    state,
-    createMaterialRequest,
-    pickMaterialRequest,
-    deliverMaterialRequestToLine,
-  } = useErpStore();
+    requests,
+    total,
+    loading,
+    error,
+    refresh,
+  } = useMaterialRequests({ autoFetch: true });
+
+  const { orders: productionOrders } = useWorkOrders({ limit: 50 });
+  const { createRequest, isPending: isCreating } = useCreateMaterialRequest();
+  const { pickRequest, isPending: isPicking } = usePickMaterialRequest();
+  const { deliverRequest, isPending: isDelivering } = useDeliverMaterialRequest();
 
   const [filterSource, setFilterSource] = useState<string>('ALL');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newMrSource, setNewMrSource] = useState<'NPI_TRIAL' | 'PRODUCTION_ORDER'>('NPI_TRIAL');
   const [destinationLine, setDestinationLine] = useState('Cell A - Staging Bay (Line 1)');
-  const [selectedMoId, setSelectedMoId] = useState<string>(
-    state.productionOrders[0]?.id || 'mo-124'
-  );
-  const [selectedNpiId, setSelectedNpiId] = useState<string>(
-    state.npiProjects[0]?.id || 'npi-001'
-  );
+  const [selectedMoId, setSelectedMoId] = useState<string>('');
+  const [selectedNpiId, setSelectedNpiId] = useState<string>(npiProjects[0]?.id || 'npi-001');
 
-  const filteredRequests = state.materialRequests.filter((mr) => {
+  // Derive current user from authenticated client context
+  const currentUser = erpApiClient.getRole() || 'Production Supervisor';
+
+  const filteredRequests = requests.filter((mr) => {
     if (filterSource === 'NPI') return mr.sourceType === 'NPI_TRIAL' || mr.sourceType === 'NPI_PILOT';
     if (filterSource === 'PRODUCTION') return mr.sourceType === 'PRODUCTION_ORDER';
     return true;
   });
 
-  const handleCreateNewMr = (e: React.FormEvent) => {
+  const handleCreateNewMr = async (e: React.FormEvent) => {
     e.preventDefault();
 
     let items: MaterialRequestItem[] = [];
@@ -48,7 +84,7 @@ export const MaterialRequestView: React.FC = () => {
     let prodSku = '';
 
     if (newMrSource === 'NPI_TRIAL') {
-      const npi = state.npiProjects.find((p) => p.id === selectedNpiId);
+      const npi = npiProjects.find((p) => p.id === selectedNpiId);
       sourceRef = npi?.projectNumber || 'NPI-2026-001';
       prodSku = npi?.productSku || 'ABC-100';
       items = [
@@ -80,10 +116,10 @@ export const MaterialRequestView: React.FC = () => {
         },
       ];
     } else {
-      const mo = state.productionOrders.find((o) => o.id === selectedMoId);
+      const mo = productionOrders.find((o) => o.id === selectedMoId) || productionOrders[0];
       sourceRef = mo?.orderNumber || 'MO-2026-00124';
       prodSku = mo?.productSku || 'Product A';
-      items = mo
+      items = mo && mo.materials && mo.materials.length > 0
         ? mo.materials.map((m, idx) => ({
             id: `mri-mo-${Date.now()}-${idx}`,
             productId: m.productId,
@@ -97,14 +133,28 @@ export const MaterialRequestView: React.FC = () => {
             toLocation: destinationLine,
             status: 'PENDING',
           }))
-        : [];
+        : [
+            {
+              id: `mri-mo-${Date.now()}-0`,
+              productId: 'mat-gen-01',
+              sku: 'RAW-GEN-01',
+              name: 'Raw Production Stock',
+              requestedQuantity: 100,
+              pickedQuantity: 0,
+              deliveredQuantity: 0,
+              uom: 'PCS',
+              fromWarehouse: 'PLANT01-RM-WH-A01',
+              toLocation: destinationLine,
+              status: 'PENDING',
+            },
+          ];
     }
 
-    createMaterialRequest({
+    const res = await createRequest({
       sourceType: newMrSource,
       sourceReferenceId: sourceRef,
       productSku: prodSku,
-      requester: state.currentUser.name,
+      requester: currentUser,
       department: 'Shop Floor Staging',
       requiredDate: new Date().toISOString().split('T')[0],
       destinationLine,
@@ -113,7 +163,27 @@ export const MaterialRequestView: React.FC = () => {
       notes: `Requisition for ${newMrSource.replace(/_/g, ' ')} dispatch.`,
     });
 
-    setShowCreateModal(false);
+    if (res.success) {
+      setShowCreateModal(false);
+      await refresh();
+    }
+  };
+
+  const handlePick = async (id: string) => {
+    const res = await pickRequest(id, { pickedBy: currentUser });
+    if (res.success) {
+      await refresh();
+    }
+  };
+
+  const handleDeliver = async (id: string, line: string) => {
+    const res = await deliverRequest(id, {
+      deliveredBy: currentUser,
+      destinationLine: line,
+    });
+    if (res.success) {
+      await refresh();
+    }
   };
 
   return (
@@ -131,7 +201,7 @@ export const MaterialRequestView: React.FC = () => {
             </h2>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Physical material movement from warehouse inventory to production lines and staging bays. Every delivery logs immutable movements to the WIP stock ledger.
+            Authoritative CQRS server dispatch from warehouse inventory to production lines and staging bays. Every delivery logs immutable movements to the server stock ledger.
           </p>
         </div>
 
@@ -146,7 +216,7 @@ export const MaterialRequestView: React.FC = () => {
                   : 'text-slate-600 dark:text-slate-400'
               }`}
             >
-              All ({state.materialRequests.length})
+              All ({total})
             </button>
             <button
               onClick={() => setFilterSource('NPI')}
@@ -171,6 +241,15 @@ export const MaterialRequestView: React.FC = () => {
           </div>
 
           <button
+            onClick={() => refresh()}
+            disabled={loading}
+            title="Refresh from server"
+            className="p-1.5 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+
+          <button
             onClick={() => setShowCreateModal(true)}
             className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm"
           >
@@ -180,8 +259,21 @@ export const MaterialRequestView: React.FC = () => {
         </div>
       </div>
 
+      {error && (
+        <div className="p-4 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 rounded-xl text-red-700 dark:text-red-300 text-xs flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>Error loading material requests: {error}</span>
+        </div>
+      )}
+
       {/* Requests List */}
       <div className="space-y-4">
+        {filteredRequests.length === 0 && !loading && (
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-8 text-center text-xs text-slate-400">
+            No material requests found. Create one using the button above.
+          </div>
+        )}
+
         {filteredRequests.map((mr) => {
           const isDelivered = mr.status === 'DELIVERED';
           const isReady = mr.status === 'READY';
@@ -225,21 +317,23 @@ export const MaterialRequestView: React.FC = () => {
 
                   {!isDelivered && !isReady && (
                     <button
-                      onClick={() => pickMaterialRequest(mr.id, state.currentUser.name)}
-                      className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold flex items-center gap-1 shadow-sm"
+                      onClick={() => handlePick(mr.id)}
+                      disabled={isPicking}
+                      className="px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded text-xs font-semibold flex items-center gap-1 shadow-sm"
                     >
                       <PackageCheck className="w-3.5 h-3.5" />
-                      Pick from Warehouse
+                      {isPicking ? 'Picking...' : 'Pick from Warehouse'}
                     </button>
                   )}
 
                   {isReady && !isDelivered && (
                     <button
-                      onClick={() => deliverMaterialRequestToLine(mr.id, state.currentUser.name, mr.destinationLine)}
-                      className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-semibold flex items-center gap-1 shadow-sm"
+                      onClick={() => handleDeliver(mr.id, mr.destinationLine)}
+                      disabled={isDelivering}
+                      className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded text-xs font-semibold flex items-center gap-1 shadow-sm"
                     >
                       <Truck className="w-3.5 h-3.5" />
-                      Confirm Line Delivery
+                      {isDelivering ? 'Delivering...' : 'Confirm Line Delivery'}
                     </button>
                   )}
                 </div>
@@ -339,7 +433,7 @@ export const MaterialRequestView: React.FC = () => {
                     onChange={(e) => setSelectedNpiId(e.target.value)}
                     className="w-full px-3 py-2 border rounded dark:bg-slate-800 dark:border-slate-700"
                   >
-                    {state.npiProjects.map((p) => (
+                    {npiProjects.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.projectNumber} — {p.productSku} ({p.productName})
                       </option>
@@ -350,11 +444,11 @@ export const MaterialRequestView: React.FC = () => {
                 <div>
                   <label className="block text-slate-500 mb-1 font-semibold">Select Production Order (MO)</label>
                   <select
-                    value={selectedMoId}
+                    value={selectedMoId || productionOrders[0]?.id || ''}
                     onChange={(e) => setSelectedMoId(e.target.value)}
                     className="w-full px-3 py-2 border rounded dark:bg-slate-800 dark:border-slate-700"
                   >
-                    {state.productionOrders.map((o) => (
+                    {productionOrders.map((o) => (
                       <option key={o.id} value={o.id}>
                         {o.orderNumber} — {o.productSku} ({o.status})
                       </option>
@@ -383,9 +477,10 @@ export const MaterialRequestView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded"
+                  disabled={isCreating}
+                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold rounded"
                 >
-                  Generate Material Request
+                  {isCreating ? 'Generating...' : 'Generate Material Request'}
                 </button>
               </div>
             </form>

@@ -1,8 +1,9 @@
 import type { Product, StockMovement } from '../../types';
 import { createErpCollectionRepository, type ErpCollectionRepository } from '../../infrastructure/database/repositories/erpCollectionRepository';
+import type { ITransactionalParticipant } from '../../shared/kernel/unitOfWork';
 import { INITIAL_PRODUCTS, INITIAL_STOCK_MOVEMENTS } from '../../lib/mockData';
 
-export interface IInventoryRepository {
+export interface IInventoryRepository extends ITransactionalParticipant {
   listMovements(): StockMovement[];
   findMovementById(id: string): StockMovement | undefined;
   findMovementsBySku(sku: string): StockMovement[];
@@ -10,6 +11,8 @@ export interface IInventoryRepository {
   listProducts(): Product[];
   findProductBySku(sku: string): Product | undefined;
   saveProduct(product: Product): Product;
+  createSnapshot(): unknown;
+  restoreSnapshot(snapshot: unknown): void;
 }
 
 export function createInventoryRepository(
@@ -34,5 +37,17 @@ export function createInventoryRepository(
     listProducts: () => productCollection.list(),
     findProductBySku: (sku: string) => productCollection.list().find((p) => p.sku === sku || p.id === sku),
     saveProduct: (product: Product) => productCollection.upsert(product, 'id'),
+    createSnapshot: () => ({
+      movements: movementCollection.createSnapshot(),
+      products: productCollection.createSnapshot(),
+    }),
+    restoreSnapshot: (snapshot: unknown) => {
+      if (snapshot && typeof snapshot === 'object') {
+        const s = snapshot as { movements?: unknown; products?: unknown };
+        if (s.movements) movementCollection.restoreSnapshot(s.movements);
+        if (s.products) productCollection.restoreSnapshot(s.products);
+      }
+    },
   };
 }
+

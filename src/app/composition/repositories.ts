@@ -54,9 +54,14 @@ import {
   createWorkflowRepository,
   type IWorkflowRepository,
 } from '../../modules/workflow/workflowRepository';
+import {
+  createMaterialRequestRepository,
+  type IMaterialRequestRepository,
+} from '../../modules/manufacturing/materialRequestRepository';
 
 export interface ErpRepositories {
   workOrder: IWorkOrderRepository;
+  materialRequest: IMaterialRequestRepository;
   inventory: IInventoryRepository;
   quality: IQualityRepository;
   procurement: IProcurementRepository;
@@ -73,6 +78,7 @@ export interface ErpRepositories {
 export function createErpRepositories(): ErpRepositories {
   return {
     workOrder: createWorkOrderRepository(),
+    materialRequest: createMaterialRequestRepository(),
     inventory: createInventoryRepository(),
     quality: createQualityRepository(),
     procurement: createProcurementRepository(),
@@ -91,6 +97,7 @@ export function createErpRepositories(): ErpRepositories {
 export const erpRepositories: ErpRepositories = createErpRepositories();
 
 export const workOrderRepository = erpRepositories.workOrder;
+export const materialRequestRepository = erpRepositories.materialRequest;
 export const inventoryRepository = erpRepositories.inventory;
 export const qualityRepository = erpRepositories.quality;
 export const procurementRepository = erpRepositories.procurement;

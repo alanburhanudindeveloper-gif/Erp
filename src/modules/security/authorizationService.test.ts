@@ -17,10 +17,23 @@ test('validated ERP session grants the expected permissions for supervisors', ()
 });
 
 test('authorization rejects callers that do not meet the required role', () => {
-  const result = authorizeRequest({ headers: { 'x-erp-role': 'Planner' } }, ['Supervisor']);
+  const session = validateErpSession({
+    userId: 'u-101',
+    role: 'Planner',
+    organizationId: 'org-1',
+  });
+  const result = authorizeRequest({ session }, ['Supervisor']);
 
   assert.equal(result.authorized, false);
+  assert.equal(result.code, 'FORBIDDEN_ROLE');
   assert.match(result.reason || '', /required role/i);
+});
+
+test('authorization rejects unauthenticated requests even if X-Erp-Role header is present', () => {
+  const result = authorizeRequest({ headers: { 'x-erp-role': 'Supervisor' } }, ['Supervisor']);
+
+  assert.equal(result.authorized, false);
+  assert.equal(result.code, 'MISSING_TOKEN');
 });
 
 test('ERP routes are protected by server-side authorization checks', () => {

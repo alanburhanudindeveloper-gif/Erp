@@ -18,6 +18,11 @@ import {
   CloseProductionOrderHandler,
   GetWorkOrderByIdHandler,
   ListWorkOrdersHandler,
+  CreateMaterialRequestHandler,
+  PickMaterialRequestHandler,
+  DeliverMaterialRequestHandler,
+  ListMaterialRequestsHandler,
+  GetMaterialRequestByIdHandler,
 } from '../../modules/manufacturing/application';
 import {
   CreatePurchaseRequisitionHandler,
@@ -52,6 +57,11 @@ export interface ErpApplication {
     closeProductionOrder: CloseProductionOrderHandler;
     getWorkOrderById: GetWorkOrderByIdHandler;
     listWorkOrders: ListWorkOrdersHandler;
+    createMaterialRequest: CreateMaterialRequestHandler;
+    pickMaterialRequest: PickMaterialRequestHandler;
+    deliverMaterialRequest: DeliverMaterialRequestHandler;
+    listMaterialRequests: ListMaterialRequestsHandler;
+    getMaterialRequestById: GetMaterialRequestByIdHandler;
   };
   procurement: {
     createPurchaseRequisition: CreatePurchaseRequisitionHandler;
@@ -79,6 +89,8 @@ export function createErpApplication(repos: ErpRepositories = erpRepositories): 
   const uow = new InMemoryUnitOfWork([
     repos.procurement,
     repos.workflow,
+    repos.workOrder,
+    repos.materialRequest,
   ]);
 
   return {
@@ -93,6 +105,11 @@ export function createErpApplication(repos: ErpRepositories = erpRepositories): 
       closeProductionOrder: new CloseProductionOrderHandler(repos.workOrder),
       getWorkOrderById: new GetWorkOrderByIdHandler(repos.workOrder),
       listWorkOrders: new ListWorkOrdersHandler(repos.workOrder),
+      createMaterialRequest: new CreateMaterialRequestHandler(repos.materialRequest),
+      pickMaterialRequest: new PickMaterialRequestHandler(repos.materialRequest),
+      deliverMaterialRequest: new DeliverMaterialRequestHandler(repos.materialRequest),
+      listMaterialRequests: new ListMaterialRequestsHandler(repos.materialRequest),
+      getMaterialRequestById: new GetMaterialRequestByIdHandler(repos.materialRequest),
     },
     procurement: {
       createPurchaseRequisition: new CreatePurchaseRequisitionHandler(repos.procurement),
