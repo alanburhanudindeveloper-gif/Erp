@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { ResolveNcrCommand } from '../../application/commands/resolveNcrCommand';
 import type { NcrResolutionResult } from '../../qualityService';
-import { erpApplication } from '../../../../app/composition/dependencies';
+import { erpApiClient } from '../../../../infrastructure/api/erpApiClient';
 
 export function useResolveNcr() {
   const [isPending, setIsPending] = useState(false);
@@ -12,15 +12,14 @@ export function useResolveNcr() {
     setIsPending(true);
     setError(null);
     try {
-      const outcome = erpApplication.quality.resolveNcr.execute(command);
-      if (outcome.isSuccess) {
-        setResult(outcome.value);
-        return { success: true, data: outcome.value };
-      } else {
-        const errorMsg = outcome.error.message;
-        setError(errorMsg);
-        return { success: false, error: errorMsg };
-      }
+      const outcome = await erpApiClient.quality.resolveNcr(command.ncrId, {
+        disposition: command.disposition,
+        rootCause: command.rootCause,
+        resolver: command.resolver,
+        notes: command.notes,
+      });
+      setResult(outcome);
+      return { success: true, data: outcome };
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown resolution error';
       setError(errorMsg);

@@ -6,11 +6,13 @@
  * Sourced cleanly for browser environments without importing Node.js server dependencies.
  */
 
-import type { PurchaseOrder, PurchaseRequisition, PurchaseOrderStatus, PurchaseRequisitionStatus, ProductionOrder, MaterialRequest, StockMovement } from '../../types';
+import type { PurchaseOrder, PurchaseRequisition, PurchaseOrderStatus, PurchaseRequisitionStatus, ProductionOrder, MaterialRequest, StockMovement, QualityInspection, NonConformanceReport } from '../../types';
 import type { CreatePurchaseRequisitionCommand } from '../../modules/procurement/application/commands/createPurchaseRequisitionCommand';
 import type { PaginatedResult } from '../../shared/kernel/pagination';
 import type { BucketBalance, BucketTransferInput } from '../../modules/inventory/inventoryLedgerService';
 import type { InventoryBalanceItem } from '../../modules/inventory/application/queries/listInventoryBalancesQuery';
+import type { InspectionEvaluationInput, InspectionEvaluationResult, NcrResolutionResult } from '../../modules/quality/qualityService';
+import type { ReleaseQcInspectionResult } from '../../modules/quality/application/commands/releaseQcInspectionCommand';
 
 export interface ApiClientConfig {
   baseUrl?: string;
@@ -461,6 +463,104 @@ export class ErpApiClient {
       role?: string;
     }): Promise<{ movement: StockMovement; message: string }> => {
       return this.request<{ movement: StockMovement; message: string }>('/api/erp/inventory/issue', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+  };
+
+  readonly quality = {
+    listInspections: (params: {
+      page?: number;
+      limit?: number;
+      sourceType?: string;
+      sourceRef?: string;
+      sku?: string;
+      lotNumber?: string;
+      result?: 'PASS' | 'FAIL' | 'CONCESSION';
+      disposition?: 'UNRESTRICTED' | 'HOLD' | 'REJECT' | 'REWORK';
+    } = {}): Promise<PaginatedResult<QualityInspection>> => {
+      const search = new URLSearchParams();
+      if (params.page) search.set('page', String(params.page));
+      if (params.limit) search.set('limit', String(params.limit));
+      if (params.sourceType) search.set('sourceType', params.sourceType);
+      if (params.sourceRef) search.set('sourceRef', params.sourceRef);
+      if (params.sku) search.set('sku', params.sku);
+      if (params.lotNumber) search.set('lotNumber', params.lotNumber);
+      if (params.result) search.set('result', params.result);
+      if (params.disposition) search.set('disposition', params.disposition);
+
+      const qs = search.toString();
+      return this.request<PaginatedResult<QualityInspection>>(
+        `/api/erp/quality/inspections${qs ? `?${qs}` : ''}`
+      );
+    },
+
+    getInspection: (id: string): Promise<QualityInspection> => {
+      return this.request<QualityInspection>(`/api/erp/quality/inspections/${encodeURIComponent(id)}`);
+    },
+
+    evaluateInspection: (payload: InspectionEvaluationInput): Promise<InspectionEvaluationResult> => {
+      return this.request<InspectionEvaluationResult>('/api/erp/quality/inspections/evaluate', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+
+    releaseInspection: (
+      id: string,
+      payload: {
+        decision: 'PASS' | 'FAIL';
+        disposition: 'UNRESTRICTED' | 'HOLD' | 'REJECT' | 'REWORK';
+        notes?: string;
+        actor?: string;
+        role?: string;
+      }
+    ): Promise<ReleaseQcInspectionResult> => {
+      return this.request<ReleaseQcInspectionResult>(`/api/erp/quality/inspections/${encodeURIComponent(id)}/release`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+
+    listNcrs: (params: {
+      page?: number;
+      limit?: number;
+      status?: string;
+      disposition?: string;
+      sku?: string;
+      orderNumber?: string;
+      lotNumber?: string;
+    } = {}): Promise<PaginatedResult<NonConformanceReport>> => {
+      const search = new URLSearchParams();
+      if (params.page) search.set('page', String(params.page));
+      if (params.limit) search.set('limit', String(params.limit));
+      if (params.status) search.set('status', params.status);
+      if (params.disposition) search.set('disposition', params.disposition);
+      if (params.sku) search.set('sku', params.sku);
+      if (params.orderNumber) search.set('orderNumber', params.orderNumber);
+      if (params.lotNumber) search.set('lotNumber', params.lotNumber);
+
+      const qs = search.toString();
+      return this.request<PaginatedResult<NonConformanceReport>>(
+        `/api/erp/quality/ncrs${qs ? `?${qs}` : ''}`
+      );
+    },
+
+    getNcr: (id: string): Promise<NonConformanceReport> => {
+      return this.request<NonConformanceReport>(`/api/erp/quality/ncrs/${encodeURIComponent(id)}`);
+    },
+
+    resolveNcr: (
+      id: string,
+      payload: {
+        disposition: 'SCRAP' | 'REWORK' | 'USE_AS_IS';
+        rootCause: string;
+        resolver?: string;
+        notes?: string;
+      }
+    ): Promise<NcrResolutionResult> => {
+      return this.request<NcrResolutionResult>(`/api/erp/quality/ncrs/${encodeURIComponent(id)}/resolve`, {
         method: 'POST',
         body: JSON.stringify(payload),
       });

@@ -37,6 +37,11 @@ import {
 import {
   EvaluateInspectionHandler,
   ResolveNcrHandler,
+  ReleaseQcInspectionHandler,
+  ListInspectionsHandler,
+  GetInspectionByIdHandler,
+  ListNcrsHandler,
+  GetNcrByIdHandler,
   ListOpenNcrsHandler,
 } from '../../modules/quality/application';
 import {
@@ -80,6 +85,11 @@ export interface ErpApplication {
   quality: {
     evaluateInspection: EvaluateInspectionHandler;
     resolveNcr: ResolveNcrHandler;
+    releaseQcInspection: ReleaseQcInspectionHandler;
+    listInspections: ListInspectionsHandler;
+    getInspectionById: GetInspectionByIdHandler;
+    listNcrs: ListNcrsHandler;
+    getNcrById: GetNcrByIdHandler;
     listOpenNcrs: ListOpenNcrsHandler;
   };
   inventory: {
@@ -100,6 +110,7 @@ export function createErpApplication(repos: ErpRepositories = erpRepositories): 
     repos.workOrder,
     repos.materialRequest,
     repos.inventory,
+    repos.quality,
   ]);
 
   return {
@@ -131,8 +142,13 @@ export function createErpApplication(repos: ErpRepositories = erpRepositories): 
       getProductionPlan: new GetProductionPlanHandler(repos.planning),
     },
     quality: {
-      evaluateInspection: new EvaluateInspectionHandler(repos.quality),
-      resolveNcr: new ResolveNcrHandler(repos.quality, repos.inventory),
+      evaluateInspection: new EvaluateInspectionHandler(repos.quality, repos.inventory, uow),
+      resolveNcr: new ResolveNcrHandler(repos.quality, repos.inventory, uow),
+      releaseQcInspection: new ReleaseQcInspectionHandler(repos.quality, repos.inventory, uow),
+      listInspections: new ListInspectionsHandler(repos.quality),
+      getInspectionById: new GetInspectionByIdHandler(repos.quality),
+      listNcrs: new ListNcrsHandler(repos.quality),
+      getNcrById: new GetNcrByIdHandler(repos.quality),
       listOpenNcrs: new ListOpenNcrsHandler(repos.quality),
     },
     inventory: {

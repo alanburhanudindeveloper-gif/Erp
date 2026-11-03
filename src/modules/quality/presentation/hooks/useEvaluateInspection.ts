@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { EvaluateInspectionCommand } from '../../application/commands/evaluateInspectionCommand';
 import type { InspectionEvaluationResult } from '../../qualityService';
-import { erpApplication } from '../../../../app/composition/dependencies';
+import { erpApiClient } from '../../../../infrastructure/api/erpApiClient';
 
 export function useEvaluateInspection() {
   const [isPending, setIsPending] = useState(false);
@@ -12,15 +12,9 @@ export function useEvaluateInspection() {
     setIsPending(true);
     setError(null);
     try {
-      const outcome = erpApplication.quality.evaluateInspection.execute(command);
-      if (outcome.isSuccess) {
-        setResult(outcome.value);
-        return { success: true, data: outcome.value };
-      } else {
-        const errorMsg = outcome.error.message;
-        setError(errorMsg);
-        return { success: false, error: errorMsg };
-      }
+      const outcome = await erpApiClient.quality.evaluateInspection(command);
+      setResult(outcome);
+      return { success: true, data: outcome };
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown evaluation error';
       setError(errorMsg);

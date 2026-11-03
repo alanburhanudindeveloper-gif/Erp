@@ -700,3 +700,154 @@ erpRouter.post(
   }
 );
 
+/* -------------------------------------------------------------
+   QUALITY CQRS ROUTES (Authoritative Server State)
+------------------------------------------------------------- */
+erpRouter.get(
+  '/quality/inspections',
+  requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor', 'Plant Manager', 'Inspector', 'Planner', 'Operator'] }),
+  (req, res) => {
+    const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+    const sourceType = req.query.sourceType as string | undefined;
+    const sourceRef = req.query.sourceRef as string | undefined;
+    const sku = req.query.sku as string | undefined;
+    const lotNumber = req.query.lotNumber as string | undefined;
+    const resultStatus = req.query.result as 'PASS' | 'FAIL' | 'CONCESSION' | undefined;
+    const disposition = req.query.disposition as 'UNRESTRICTED' | 'HOLD' | 'REJECT' | 'REWORK' | undefined;
+
+    const result = erpApplication.quality.listInspections.execute({
+      page,
+      limit,
+      sourceType,
+      sourceRef,
+      sku,
+      lotNumber,
+      result: resultStatus,
+      disposition,
+    });
+
+    res.json(result);
+  }
+);
+
+erpRouter.get(
+  '/quality/inspections/:id',
+  requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor', 'Plant Manager', 'Inspector', 'Planner', 'Operator'] }),
+  (req, res) => {
+    const result = erpApplication.quality.getInspectionById.execute({ id: req.params.id });
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(404).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.post(
+  '/quality/inspections/evaluate',
+  requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor', 'Plant Manager', 'Inspector'] }),
+  (req, res) => {
+    const session = (req as any).session;
+    const body = req.body || {};
+    const command = {
+      ...body,
+      inspector: body.inspector || session?.userId || 'Quality Inspector',
+    };
+
+    const result = erpApplication.quality.evaluateInspection.execute(command);
+    if (result.isSuccess) {
+      res.status(201).json(result.value);
+    } else {
+      res.status(400).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.post(
+  '/quality/inspections/:id/release',
+  requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor', 'Plant Manager'] }),
+  (req, res) => {
+    const session = (req as any).session;
+    const { decision, disposition, notes, actor, role } = req.body || {};
+
+    const result = erpApplication.quality.releaseQcInspection.execute({
+      inspectionId: req.params.id,
+      decision,
+      disposition,
+      notes,
+      actor: actor || session?.userId || 'Quality Lead',
+      role: role || session?.role || 'Quality Lead',
+    });
+
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(400).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.get(
+  '/quality/ncrs',
+  requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor', 'Plant Manager', 'Inspector', 'Planner', 'Operator'] }),
+  (req, res) => {
+    const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+    const status = req.query.status as any;
+    const disposition = req.query.disposition as any;
+    const sku = req.query.sku as string | undefined;
+    const orderNumber = req.query.orderNumber as string | undefined;
+    const lotNumber = req.query.lotNumber as string | undefined;
+
+    const result = erpApplication.quality.listNcrs.execute({
+      page,
+      limit,
+      status,
+      disposition,
+      sku,
+      orderNumber,
+      lotNumber,
+    });
+
+    res.json(result);
+  }
+);
+
+erpRouter.get(
+  '/quality/ncrs/:id',
+  requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor', 'Plant Manager', 'Inspector', 'Planner', 'Operator'] }),
+  (req, res) => {
+    const result = erpApplication.quality.getNcrById.execute({ id: req.params.id });
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(404).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.post(
+  '/quality/ncrs/:id/resolve',
+  requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor', 'Plant Manager'] }),
+  (req, res) => {
+    const session = (req as any).session;
+    const { disposition, rootCause, resolver, notes } = req.body || {};
+
+    const result = erpApplication.quality.resolveNcr.execute({
+      ncrId: req.params.id,
+      disposition,
+      rootCause,
+      resolver: resolver || session?.userId || 'QA Manager',
+      notes,
+    });
+
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(400).json({ error: result.error.message });
+    }
+  }
+);
+
+

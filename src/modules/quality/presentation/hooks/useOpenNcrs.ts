@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { NonConformanceReport } from '../../../../types';
-import { erpApplication } from '../../../../app/composition/dependencies';
+import { erpApiClient } from '../../../../infrastructure/api/erpApiClient';
 
 export interface UseOpenNcrsOptions {
   page?: number;
@@ -22,13 +22,14 @@ export function useOpenNcrs(options: UseOpenNcrsOptions = {}) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchNcrs = useCallback(() => {
+  const fetchNcrs = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = erpApplication.quality.listOpenNcrs.execute({
+      const result = await erpApiClient.quality.listNcrs({
         page,
         limit,
+        status: 'OPEN',
         sku,
         orderNumber,
       });
