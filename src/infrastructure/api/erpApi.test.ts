@@ -350,11 +350,12 @@ test('ERP Server HTTP API: Material Requests End-to-End CQRS & Lifecycle', async
   }
 });
 
-test('ERP Storage Adapter: Authoritative Material Requests and Production Orders are sanitized from localStorage', () => {
+test('ERP Storage Adapter: Authoritative Material Requests, Production Orders, and Stock Movements are sanitized from localStorage', () => {
   const dummyState = {
     productionOrders: [{ id: 'mo-local-fake', orderNumber: 'MO-FAKE' }],
     materialRequests: [{ id: 'mr-local-fake', requestNumber: 'MR-FAKE' }],
     purchaseRequisitions: [{ id: 'pr-local-fake', prNumber: 'PR-FAKE' }],
+    stockMovements: [{ id: 'mov-local-fake', movementNo: 'MOV-FAKE' }],
     otherField: 'preserved_value',
   };
 
@@ -366,4 +367,106 @@ test('ERP Storage Adapter: Authoritative Material Requests and Production Orders
   assert.equal((loaded as any).productionOrders, undefined, 'productionOrders must be stripped from local storage');
   assert.equal((loaded as any).materialRequests, undefined, 'materialRequests must be stripped from local storage');
   assert.equal((loaded as any).purchaseRequisitions, undefined, 'purchaseRequisitions must be stripped from local storage');
+  assert.equal((loaded as any).stockMovements, undefined, 'stockMovements must be stripped from local storage');
 });
+
+test('ERP Server API End-to-End: Inventory Balances, Movements, Transfers, and Reversals', async () => {
+  const testApp = express();
+  testApp.use(express.json());
+  testApp.use('/api/erp', erpRouter);
+
+  const server = http.createServer(testApp);
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const port = address.port;
+
+  const supervisorClient = new ErpApiClient({ baseUrl: `http://localhost:${port}`, defaultRole: 'Supervisor' });
+
+  try {
+    // 1. Query Balances
+    const balances = await supervisorClient.inventory.listBalances({ page: 1, limit: 10 });
+    assert.ok(Array.isArray(balances.items), 'Balances items must be an array');
+    assert.ok(balances.total >= 0);
+
+    // 2. Query Movements
+    const movements = await supervisorClient.inventory.listMovements({ page: 1, limit: 10 });
+    assert.ok(Array.isArray(movements.items), 'Movements items must be an array');
+    const initialMovementCount = movements.total;
+
+    // 3. Transfer Stock
+    const firstProduct = erpRepositories.inventory.listProducts()[0];
+    assert.ok(firstProduct, 'Product must exist for transfer test');
+
+    const transferResult = await supervisorClient.inventory.transferStock({
+      productId: firstProduct.id,
+      sku: firstProduct.sku,
+      quantity: 5,
+      uom: firstProduct.baseUom,
+      fromBucket: 'AVAILABLE',
+      toBucket: 'HOLD',
+      fromLocation: 'MAIN-WH-A1',
+      toLocation: 'HOLD-INSPECT',
+      lotNumber: 'LOT-TEST-01',
+      sourceDocument: 'TR-DOC-001',
+      reason: 'Routine quality quarantine check',
+      actor: 'Warehouse Supervisor Budi',
+      role: 'Supervisor',
+    });
+
+    assert.ok(transferResult.id);
+    assert.equal(transferResult.sku, firstProduct.sku);
+    assert.equal(transferResult.stockBucket, 'HOLD');
+    assert.equal(transferResult.quantity, 5);
+
+    // Verify movements count incremented
+    const afterTransferMovements = await supervisorClient.inventory.listMovements({ page: 1, limit: 10 });
+    assert.equal(afterTransferMovements.total, initialMovementCount + 1);
+
+    // 4. Reverse Movement
+    const reverseResult = await supervisorClient.inventory.reverseMovement(transferResult.id, {
+      reason: 'Reversing quarantine transfer test',
+      actor: 'Warehouse Supervisor Budi',
+      role: 'Supervisor',
+    });
+    assert.ok(reverseResult.id);
+    assert.equal(reverseResult.movementType, 'REVERSAL');
+
+    // 5. Query single movement by ID
+    const singleMovement = await supervisorClient.inventory.getMovementById(transferResult.id);
+    assert.equal(singleMovement.id, transferResult.id);
+
+    // 6. Query single product balance
+    const singleBalance = await supervisorClient.inventory.getBalanceBySku(firstProduct.sku);
+    assert.equal(typeof singleBalance.available, 'number');
+    assert.equal(typeof singleBalance.hold, 'number');
+    assert.equal(typeof singleBalance.totalPhysicalOnHand, 'number');
+
+    // 7. Role-Based Access Control: Viewer role cannot transfer stock
+    const viewerClient = new ErpApiClient({ baseUrl: `http://localhost:${port}`, defaultRole: 'Viewer' });
+    await assert.rejects(
+      async () => {
+        await viewerClient.inventory.transferStock({
+          productId: firstProduct.id,
+          sku: firstProduct.sku,
+          quantity: 1,
+          uom: firstProduct.baseUom,
+          fromBucket: 'AVAILABLE',
+          toBucket: 'HOLD',
+          fromLocation: 'LOC-1',
+          toLocation: 'LOC-2',
+          lotNumber: 'LOT-TEST-01',
+          sourceDocument: 'TR-DOC-VIEWER',
+          reason: 'Unauthorized test',
+          actor: 'Viewer User',
+          role: 'Viewer',
+        });
+      },
+      /is not allowed|FORBIDDEN|Access denied/i,
+      'Viewer role must not be permitted to transfer stock'
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  }
+});
+

@@ -519,11 +519,35 @@ erpRouter.get(
 );
 
 /* -------------------------------------------------------------
-   INVENTORY CQRS ROUTES
+   INVENTORY CQRS ROUTES (Authoritative Server State)
 ------------------------------------------------------------- */
 erpRouter.get(
-  '/inventory/balance/:sku',
-  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Quality Lead', 'Plant Manager'] }),
+  '/inventory/balances',
+  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Quality Lead', 'Plant Manager', 'Procurement Manager', 'Buyer', 'Operator'] }),
+  (req, res) => {
+    const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+    const sku = req.query.sku as string | undefined;
+    const type = req.query.type as string | undefined;
+    const category = req.query.category as string | undefined;
+    const belowBufferOnly = req.query.belowBufferOnly === 'true';
+
+    const result = erpApplication.inventory.listInventoryBalances.execute({
+      page,
+      limit,
+      sku,
+      type,
+      category,
+      belowBufferOnly,
+    });
+
+    res.json(result);
+  }
+);
+
+erpRouter.get(
+  '/inventory/balances/:sku',
+  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Quality Lead', 'Plant Manager', 'Procurement Manager', 'Buyer', 'Operator'] }),
   (req, res) => {
     const sku = req.params.sku;
     const result = erpApplication.inventory.get5BucketBalance.execute({ sku });
@@ -535,11 +559,69 @@ erpRouter.get(
   }
 );
 
-erpRouter.post(
-  '/inventory/transfer',
-  requireErpAuth({ requiredRoles: ['Supervisor', 'Quality Lead', 'Plant Manager'] }),
+// Backward compatibility alias
+erpRouter.get(
+  '/inventory/balance/:sku',
+  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Quality Lead', 'Plant Manager', 'Procurement Manager', 'Buyer', 'Operator'] }),
   (req, res) => {
-    const command = req.body;
+    const sku = req.params.sku;
+    const result = erpApplication.inventory.get5BucketBalance.execute({ sku });
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(404).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.get(
+  '/inventory/movements',
+  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Quality Lead', 'Plant Manager', 'Procurement Manager', 'Operator'] }),
+  (req, res) => {
+    const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+    const sku = req.query.sku as string | undefined;
+    const movementType = req.query.movementType as string | undefined;
+    const stockBucket = req.query.stockBucket as string | undefined;
+    const lotNumber = req.query.lotNumber as string | undefined;
+
+    const result = erpApplication.inventory.listStockMovements.execute({
+      page,
+      limit,
+      sku,
+      movementType,
+      stockBucket,
+      lotNumber,
+    });
+
+    res.json(result);
+  }
+);
+
+erpRouter.get(
+  '/inventory/movements/:id',
+  requireErpAuth({ requiredRoles: ['Planner', 'Supervisor', 'Quality Lead', 'Plant Manager', 'Procurement Manager', 'Operator'] }),
+  (req, res) => {
+    const result = erpApplication.inventory.getStockMovementById.execute({ id: req.params.id });
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(404).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.post(
+  '/inventory/transfers',
+  requireErpAuth({ requiredRoles: ['Supervisor', 'Quality Lead', 'Plant Manager', 'Operator'] }),
+  (req, res) => {
+    const session = (req as any).session;
+    const body = req.body || {};
+    const command = {
+      ...body,
+      actor: body.actor || session?.userId || 'Warehouse Operator',
+      role: body.role || session?.role || 'Operator',
+    };
     const result = erpApplication.inventory.transferStock.execute(command);
     if (result.isSuccess) {
       res.json(result.value);
@@ -548,3 +630,73 @@ erpRouter.post(
     }
   }
 );
+
+// Backward compatibility alias
+erpRouter.post(
+  '/inventory/transfer',
+  requireErpAuth({ requiredRoles: ['Supervisor', 'Quality Lead', 'Plant Manager', 'Operator'] }),
+  (req, res) => {
+    const session = (req as any).session;
+    const body = req.body || {};
+    const command = {
+      ...body,
+      actor: body.actor || session?.userId || 'Warehouse Operator',
+      role: body.role || session?.role || 'Operator',
+    };
+    const result = erpApplication.inventory.transferStock.execute(command);
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(400).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.post(
+  '/inventory/movements/:id/reverse',
+  requireErpAuth({ requiredRoles: ['Supervisor', 'Quality Lead', 'Plant Manager'] }),
+  (req, res) => {
+    const session = (req as any).session;
+    const movementId = req.params.id;
+    const { reason, actor, role } = req.body || {};
+
+    const result = erpApplication.inventory.reverseMovement.execute({
+      movementId,
+      reason: reason || 'Compensating reversal posted by controller',
+      actor: actor || session?.userId || 'Warehouse Controller',
+      role: role || session?.role || 'Supervisor',
+    });
+
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(400).json({ error: result.error.message });
+    }
+  }
+);
+
+erpRouter.post(
+  '/inventory/issue',
+  requireErpAuth({ requiredRoles: ['Supervisor', 'Operator', 'Plant Manager'] }),
+  (req, res) => {
+    const session = (req as any).session;
+    const { orderId, componentSku, lotNumber, quantity, isHoldOverride, actor, role } = req.body || {};
+
+    const result = erpApplication.inventory.issueMaterial.execute({
+      orderId,
+      componentSku,
+      lotNumber,
+      quantity: Number(quantity),
+      actor: actor || session?.userId || 'Shop Floor Operator',
+      role: role || session?.role || 'Operator',
+      isHoldOverride: Boolean(isHoldOverride),
+    });
+
+    if (result.isSuccess) {
+      res.json(result.value);
+    } else {
+      res.status(400).json({ error: result.error.message });
+    }
+  }
+);
+

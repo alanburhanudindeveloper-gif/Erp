@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { StockMovement } from '../../../../types';
 import type { ReverseMovementCommand } from '../../application/commands/reverseMovementCommand';
-import { erpApplication } from '../../../../app/composition/dependencies';
+import { erpApiClient } from '../../../../infrastructure/api/erpApiClient';
 
 export function useReverseMovement() {
   const [isPending, setIsPending] = useState(false);
@@ -12,15 +12,13 @@ export function useReverseMovement() {
     setIsPending(true);
     setError(null);
     try {
-      const outcome = erpApplication.inventory.reverseMovement.execute(command);
-      if (outcome.isSuccess) {
-        setResult(outcome.value);
-        return { success: true, data: outcome.value };
-      } else {
-        const errorMsg = outcome.error.message;
-        setError(errorMsg);
-        return { success: false, error: errorMsg };
-      }
+      const data = await erpApiClient.inventory.reverseMovement(command.movementId, {
+        reason: command.reason,
+        actor: command.actor,
+        role: command.role,
+      });
+      setResult(data);
+      return { success: true, data };
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown reversal error';
       setError(errorMsg);

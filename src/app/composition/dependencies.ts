@@ -43,6 +43,10 @@ import {
   TransferStockHandler,
   ReverseMovementHandler,
   Get5BucketBalanceHandler,
+  ListStockMovementsHandler,
+  GetStockMovementByIdHandler,
+  ListInventoryBalancesHandler,
+  IssueMaterialHandler,
 } from '../../modules/inventory/application';
 
 export interface ErpApplication {
@@ -82,6 +86,10 @@ export interface ErpApplication {
     transferStock: TransferStockHandler;
     reverseMovement: ReverseMovementHandler;
     get5BucketBalance: Get5BucketBalanceHandler;
+    listStockMovements: ListStockMovementsHandler;
+    getStockMovementById: GetStockMovementByIdHandler;
+    listInventoryBalances: ListInventoryBalancesHandler;
+    issueMaterial: IssueMaterialHandler;
   };
 }
 
@@ -91,6 +99,7 @@ export function createErpApplication(repos: ErpRepositories = erpRepositories): 
     repos.workflow,
     repos.workOrder,
     repos.materialRequest,
+    repos.inventory,
   ]);
 
   return {
@@ -130,6 +139,10 @@ export function createErpApplication(repos: ErpRepositories = erpRepositories): 
       transferStock: new TransferStockHandler(repos.inventory),
       reverseMovement: new ReverseMovementHandler(repos.inventory),
       get5BucketBalance: new Get5BucketBalanceHandler(repos.inventory),
+      listStockMovements: new ListStockMovementsHandler(repos.inventory),
+      getStockMovementById: new GetStockMovementByIdHandler(repos.inventory),
+      listInventoryBalances: new ListInventoryBalancesHandler(repos.inventory),
+      issueMaterial: new IssueMaterialHandler(repos.inventory, repos.workOrder, uow),
     },
   };
 }

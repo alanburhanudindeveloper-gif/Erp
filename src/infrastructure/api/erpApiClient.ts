@@ -6,9 +6,11 @@
  * Sourced cleanly for browser environments without importing Node.js server dependencies.
  */
 
-import type { PurchaseOrder, PurchaseRequisition, PurchaseOrderStatus, PurchaseRequisitionStatus, ProductionOrder, MaterialRequest } from '../../types';
+import type { PurchaseOrder, PurchaseRequisition, PurchaseOrderStatus, PurchaseRequisitionStatus, ProductionOrder, MaterialRequest, StockMovement } from '../../types';
 import type { CreatePurchaseRequisitionCommand } from '../../modules/procurement/application/commands/createPurchaseRequisitionCommand';
 import type { PaginatedResult } from '../../shared/kernel/pagination';
+import type { BucketBalance, BucketTransferInput } from '../../modules/inventory/inventoryLedgerService';
+import type { InventoryBalanceItem } from '../../modules/inventory/application/queries/listInventoryBalancesQuery';
 
 export interface ApiClientConfig {
   baseUrl?: string;
@@ -373,6 +375,92 @@ export class ErpApiClient {
       payload: { deliveredBy?: string; destinationLine?: string; deliveredAt?: string } = {}
     ): Promise<MaterialRequest> => {
       return this.request<MaterialRequest>(`/api/erp/material-requests/${encodeURIComponent(id)}/deliver`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+  };
+
+  readonly inventory = {
+    listBalances: (params: {
+      page?: number;
+      limit?: number;
+      sku?: string;
+      type?: string;
+      category?: string;
+      belowBufferOnly?: boolean;
+    } = {}): Promise<PaginatedResult<InventoryBalanceItem>> => {
+      const search = new URLSearchParams();
+      if (params.page) search.set('page', String(params.page));
+      if (params.limit) search.set('limit', String(params.limit));
+      if (params.sku) search.set('sku', params.sku);
+      if (params.type) search.set('type', params.type);
+      if (params.category) search.set('category', params.category);
+      if (params.belowBufferOnly) search.set('belowBufferOnly', 'true');
+
+      const qs = search.toString();
+      return this.request<PaginatedResult<InventoryBalanceItem>>(
+        `/api/erp/inventory/balances${qs ? `?${qs}` : ''}`
+      );
+    },
+
+    getBalanceBySku: (sku: string): Promise<BucketBalance> => {
+      return this.request<BucketBalance>(`/api/erp/inventory/balances/${encodeURIComponent(sku)}`);
+    },
+
+    listMovements: (params: {
+      page?: number;
+      limit?: number;
+      sku?: string;
+      movementType?: string;
+      stockBucket?: string;
+      lotNumber?: string;
+    } = {}): Promise<PaginatedResult<StockMovement>> => {
+      const search = new URLSearchParams();
+      if (params.page) search.set('page', String(params.page));
+      if (params.limit) search.set('limit', String(params.limit));
+      if (params.sku) search.set('sku', params.sku);
+      if (params.movementType) search.set('movementType', params.movementType);
+      if (params.stockBucket) search.set('stockBucket', params.stockBucket);
+      if (params.lotNumber) search.set('lotNumber', params.lotNumber);
+
+      const qs = search.toString();
+      return this.request<PaginatedResult<StockMovement>>(
+        `/api/erp/inventory/movements${qs ? `?${qs}` : ''}`
+      );
+    },
+
+    getMovementById: (id: string): Promise<StockMovement> => {
+      return this.request<StockMovement>(`/api/erp/inventory/movements/${encodeURIComponent(id)}`);
+    },
+
+    transferStock: (payload: BucketTransferInput): Promise<StockMovement> => {
+      return this.request<StockMovement>('/api/erp/inventory/transfers', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+
+    reverseMovement: (
+      id: string,
+      payload: { reason?: string; actor?: string; role?: string } = {}
+    ): Promise<StockMovement> => {
+      return this.request<StockMovement>(`/api/erp/inventory/movements/${encodeURIComponent(id)}/reverse`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+
+    issueMaterial: (payload: {
+      orderId: string;
+      componentSku: string;
+      lotNumber: string;
+      quantity: number;
+      isHoldOverride?: boolean;
+      actor?: string;
+      role?: string;
+    }): Promise<{ movement: StockMovement; message: string }> => {
+      return this.request<{ movement: StockMovement; message: string }>('/api/erp/inventory/issue', {
         method: 'POST',
         body: JSON.stringify(payload),
       });

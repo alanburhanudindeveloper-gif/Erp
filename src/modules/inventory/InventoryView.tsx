@@ -18,6 +18,11 @@ import { Product, StockMovement, ProductionOrder } from '../../types';
 import { StatusBadge } from '../../components/common/StatusBadge';
 import { AiDocumentExtractorModal } from '../../components/ai/AiDocumentExtractorModal';
 import {
+  useInventoryBalances,
+  useStockMovements,
+  useIssueMaterial,
+} from './presentation/hooks';
+import {
   EnterpriseDataGrid,
   GridColumn,
   createTextColumn,
@@ -51,6 +56,49 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   onSelectSubTab,
   onIssueMaterial,
 }) => {
+  // Authoritative server-managed inventory data via CQRS presentation hooks
+  const {
+    items: serverBalances,
+    refresh: refreshBalances,
+  } = useInventoryBalances({ limit: 100, autoFetch: true });
+
+  const {
+    movements: serverMovements,
+    refresh: refreshMovements,
+  } = useStockMovements({ limit: 100, autoFetch: true });
+
+  const { issueMaterial: serverIssueMaterial } = useIssueMaterial();
+
+  const effectiveMovements = serverMovements && serverMovements.length > 0 ? serverMovements : stockMovements;
+
+  const effectiveProducts = useMemo<Product[]>(() => {
+    if (serverBalances && serverBalances.length > 0) {
+      return serverBalances.map((b) => {
+        const matching = products.find((p) => p.sku === b.sku);
+        return {
+          id: b.id,
+          sku: b.sku,
+          name: b.name,
+          type: b.type,
+          baseUom: (matching?.baseUom ?? b.baseUom) as any,
+          category: b.category,
+          currentStock: b.currentStock,
+          allocatedStock: b.allocatedStock,
+          safetyStock: b.safetyStock,
+          reorderPoint: matching?.reorderPoint ?? 100,
+          leadTimeDays: matching?.leadTimeDays ?? 7,
+          standardCost: matching?.standardCost ?? 0,
+          makeOrBuy: matching?.makeOrBuy ?? 'BUY',
+          lotSerialPolicy: matching?.lotSerialPolicy ?? 'LOT',
+          status: matching?.status ?? 'ACTIVE',
+          onOrderStock: matching?.onOrderStock ?? 0,
+          description: matching?.description ?? b.name,
+        };
+      });
+    }
+    return products;
+  }, [serverBalances, products]);
+
   const [traceLotQuery, setTraceLotQuery] = useState('LOT-X-L100');
   const [traceResult, setTraceResult] = useState<any>(null);
   const [issueSimulationFeedback, setIssueSimulationFeedback] = useState<string | null>(null);
@@ -220,6 +268,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   }
 
   const multiBucketData = useMemo<MultiBucketRow[]>(() => {
+    if (serverBalances && serverBalances.length > 0) {
+      return serverBalances.map((b) => ({
+        id: b.id,
+        sku: b.sku,
+        name: b.name,
+        baseUom: b.baseUom,
+        available: b.buckets.available,
+        reserved: b.buckets.reserved,
+        hold: b.buckets.hold,
+        rejected: b.buckets.rejected,
+        wip: b.buckets.wip,
+        total: b.buckets.totalPhysicalOnHand,
+      }));
+    }
     return products.map((p) => {
       const isRawX = p.sku === 'Material X';
       const isRawY = p.sku === 'Material Y';
@@ -242,7 +304,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         total,
       };
     });
-  }, [products]);
+  }, [serverBalances, products]);
 
   const multiBucketColumns = useMemo<GridColumn<MultiBucketRow>[]>(
     () => [
@@ -537,7 +599,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
 
           <EnterpriseDataGrid<Product>
-            data={products}
+            data={effectiveProducts}
             columns={atpColumns}
             pagination
             searchable
@@ -579,13 +641,29 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </span>
               </div>
               <button
-                onClick={() => {
-                  if (onIssueMaterial) {
-                    const res = onIssueMaterial('mo-124', 'Material X', 'LOT-SUP-STL-89', 200);
+                onClick={async () => {
+                  try {
+                    const res = await serverIssueMaterial({
+                      orderId: 'mo-124',
+                      componentSku: 'Material X',
+                      lotNumber: 'LOT-SUP-STL-89',
+                      quantity: 200,
+                    });
                     if (!res.success) {
                       setIssueSimulationFeedback(res.error || 'Transaction blocked by BR-INV-003');
                     } else {
                       setIssueSimulationFeedback('Issued successfully (Override enabled).');
+                      await refreshBalances();
+                      await refreshMovements();
+                    }
+                  } catch (err: unknown) {
+                    if (onIssueMaterial) {
+                      const res = onIssueMaterial('mo-124', 'Material X', 'LOT-SUP-STL-89', 200);
+                      if (!res.success) {
+                        setIssueSimulationFeedback(res.error || 'Transaction blocked by BR-INV-003');
+                      } else {
+                        setIssueSimulationFeedback('Issued successfully (Override enabled).');
+                      }
                     }
                   }
                 }}
@@ -660,7 +738,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
 
           <EnterpriseDataGrid<StockMovement>
-            data={stockMovements}
+            data={effectiveMovements}
             columns={movementColumns}
             pagination
             searchable

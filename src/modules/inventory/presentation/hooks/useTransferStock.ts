@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { StockMovement } from '../../../../types';
 import type { TransferStockCommand } from '../../application/commands/transferStockCommand';
-import { erpApplication } from '../../../../app/composition/dependencies';
+import { erpApiClient } from '../../../../infrastructure/api/erpApiClient';
 
 export function useTransferStock() {
   const [isPending, setIsPending] = useState(false);
@@ -12,15 +12,9 @@ export function useTransferStock() {
     setIsPending(true);
     setError(null);
     try {
-      const outcome = erpApplication.inventory.transferStock.execute(command);
-      if (outcome.isSuccess) {
-        setResult(outcome.value);
-        return { success: true, data: outcome.value };
-      } else {
-        const errorMsg = outcome.error.message;
-        setError(errorMsg);
-        return { success: false, error: errorMsg };
-      }
+      const data = await erpApiClient.inventory.transferStock(command);
+      setResult(data);
+      return { success: true, data };
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown transfer error';
       setError(errorMsg);

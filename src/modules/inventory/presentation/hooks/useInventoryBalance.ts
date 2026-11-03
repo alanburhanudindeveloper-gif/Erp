@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { BucketBalance } from '../../inventoryLedgerService';
-import { erpApplication } from '../../../../app/composition/dependencies';
+import { erpApiClient } from '../../../../infrastructure/api/erpApiClient';
 
 export interface UseInventoryBalanceOptions {
   sku: string;
@@ -12,19 +12,13 @@ export function useInventoryBalance(options: UseInventoryBalanceOptions) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchBalance = useCallback(() => {
+  const fetchBalance = useCallback(async () => {
     if (!options.sku) return;
     setLoading(true);
     setError(null);
     try {
-      const outcome = erpApplication.inventory.get5BucketBalance.execute({
-        sku: options.sku,
-      });
-      if (outcome.isSuccess) {
-        setBalance(outcome.value);
-      } else {
-        setError(outcome.error.message);
-      }
+      const data = await erpApiClient.inventory.getBalanceBySku(options.sku);
+      setBalance(data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to fetch inventory balance');
     } finally {
