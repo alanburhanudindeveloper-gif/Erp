@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { erpApplication } from '../../app/composition/dependencies';
 import { requireErpAuth } from '../../modules/security/authorizationService';
 import { createDevToken } from '../../modules/security/tokenService';
+import { QUALITY_PERMISSIONS } from '../../modules/quality';
 import {
   getCapacityOverview,
   getErpDashboardSummary,
@@ -705,7 +706,7 @@ erpRouter.post(
 ------------------------------------------------------------- */
 erpRouter.get(
   '/quality/inspections',
-  requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor', 'Plant Manager', 'Inspector', 'Planner', 'Operator'] }),
+  requireErpAuth({ requiredPermission: QUALITY_PERMISSIONS.INSPECTION_READ }),
   (req, res) => {
     const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
@@ -733,7 +734,7 @@ erpRouter.get(
 
 erpRouter.get(
   '/quality/inspections/:id',
-  requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor', 'Plant Manager', 'Inspector', 'Planner', 'Operator'] }),
+  requireErpAuth({ requiredPermission: QUALITY_PERMISSIONS.INSPECTION_READ }),
   (req, res) => {
     const result = erpApplication.quality.getInspectionById.execute({ id: req.params.id });
     if (result.isSuccess) {
@@ -746,7 +747,7 @@ erpRouter.get(
 
 erpRouter.post(
   '/quality/inspections/evaluate',
-  requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor', 'Plant Manager', 'Inspector'] }),
+  requireErpAuth({ requiredPermission: QUALITY_PERMISSIONS.INSPECTION_EVALUATE }),
   (req, res) => {
     const session = (req as any).session;
     const body = req.body || {};
@@ -766,7 +767,7 @@ erpRouter.post(
 
 erpRouter.post(
   '/quality/inspections/:id/release',
-  requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor', 'Plant Manager'] }),
+  requireErpAuth({ requiredPermission: QUALITY_PERMISSIONS.INSPECTION_RELEASE }),
   (req, res) => {
     const session = (req as any).session;
     const { decision, disposition, notes, actor, role } = req.body || {};
@@ -790,7 +791,7 @@ erpRouter.post(
 
 erpRouter.get(
   '/quality/ncrs',
-  requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor', 'Plant Manager', 'Inspector', 'Planner', 'Operator'] }),
+  requireErpAuth({ requiredPermission: QUALITY_PERMISSIONS.NCR_READ }),
   (req, res) => {
     const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
@@ -816,7 +817,7 @@ erpRouter.get(
 
 erpRouter.get(
   '/quality/ncrs/:id',
-  requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor', 'Plant Manager', 'Inspector', 'Planner', 'Operator'] }),
+  requireErpAuth({ requiredPermission: QUALITY_PERMISSIONS.NCR_READ }),
   (req, res) => {
     const result = erpApplication.quality.getNcrById.execute({ id: req.params.id });
     if (result.isSuccess) {
@@ -829,7 +830,7 @@ erpRouter.get(
 
 erpRouter.post(
   '/quality/ncrs/:id/resolve',
-  requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor', 'Plant Manager'] }),
+  requireErpAuth({ requiredPermission: QUALITY_PERMISSIONS.NCR_RESOLVE }),
   (req, res) => {
     const session = (req as any).session;
     const { disposition, rootCause, resolver, notes } = req.body || {};

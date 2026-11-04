@@ -4,7 +4,9 @@ import { getErpAuthSecret } from './authConfig';
 export interface ErpTokenPayload {
   userId: string;
   role: string;
+  roles?: string[];
   organizationId: string;
+  plantScope?: string[];
   permissions?: string[];
   iat: number;
   exp: number;
@@ -75,7 +77,9 @@ export function generateErpToken(
   claims: {
     userId: string;
     role: string;
+    roles?: string[];
     organizationId: string;
+    plantScope?: string[];
     permissions?: string[];
   },
   options: {
@@ -97,7 +101,9 @@ export function generateErpToken(
   const payload: ErpTokenPayload = {
     userId: claims.userId,
     role: claims.role,
+    roles: claims.roles && claims.roles.length > 0 ? claims.roles : [claims.role],
     organizationId: claims.organizationId,
+    plantScope: claims.plantScope || ['*'],
     permissions: claims.permissions || [],
     iat: now,
     exp: now + expiresIn,
@@ -201,13 +207,17 @@ export function createDevToken(
   role: string,
   userId = `usr-${role.toLowerCase().replace(/\s+/g, '-')}-01`,
   organizationId = 'default-org',
-  expiresInSeconds = 86400
+  expiresInSeconds = 86400,
+  extraClaims: { roles?: string[]; plantScope?: string[]; permissions?: string[] } = {}
 ): string {
   return generateErpToken(
     {
       userId,
       role,
+      roles: extraClaims.roles && extraClaims.roles.length > 0 ? extraClaims.roles : [role],
       organizationId,
+      plantScope: extraClaims.plantScope,
+      permissions: extraClaims.permissions,
     },
     { expiresInSeconds }
   );

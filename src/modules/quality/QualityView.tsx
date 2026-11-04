@@ -14,6 +14,8 @@ import {
 import { QualityInspection, NonConformanceReport, ReworkOrder, ReasonCode } from '../../types';
 import { StatusBadge } from '../../components/common/StatusBadge';
 import { AiRootCauseModal } from '../../components/ai/AiRootCauseModal';
+import { useInspections, useNcrs, useReleaseQcInspection } from './presentation/hooks';
+import { useAuthorization } from '../security';
 import {
   EnterpriseDataGrid,
   GridColumn,
@@ -48,6 +50,47 @@ export const QualityView: React.FC<QualityViewProps> = ({
   onSelectSubTab,
   onReleaseQc,
 }) => {
+  // Authoritative server-managed quality data via CQRS presentation hooks
+  const {
+    inspections: serverInspections,
+    refresh: refreshInspections,
+  } = useInspections({ limit: 100, autoFetch: true });
+
+  const {
+    ncrs: serverNcrs,
+    refresh: refreshNcrs,
+  } = useNcrs({ limit: 100, autoFetch: true });
+
+  const { releaseInspection: serverReleaseInspection } = useReleaseQcInspection();
+  const { can } = useAuthorization();
+  const canReleaseQc = can('quality.inspection.release');
+  const canResolveNcr = can('quality.ncr.resolve');
+
+  const effectiveInspections = serverInspections && serverInspections.length > 0 ? serverInspections : inspections;
+  const effectiveNcrs = serverNcrs && serverNcrs.length > 0 ? serverNcrs : ncrs;
+
+  const handleReleaseQc = async (
+    inspectionId: string,
+    decision: 'PASS' | 'FAIL',
+    disposition: 'UNRESTRICTED' | 'HOLD' | 'REJECT' | 'REWORK',
+    notes: string
+  ) => {
+    try {
+      await serverReleaseInspection(inspectionId, {
+        decision,
+        disposition,
+        notes,
+      });
+      await refreshInspections();
+      await refreshNcrs();
+    } catch {
+      // Offline or server fallback
+    }
+    if (onReleaseQc) {
+      onReleaseQc(inspectionId, decision, disposition, notes);
+    }
+  };
+
   const [rootCauseModal, setRootCauseModal] = useState<{
     isOpen: boolean;
     anomalyTitle: string;
@@ -128,12 +171,22 @@ export const QualityView: React.FC<QualityViewProps> = ({
       createTextColumn<QualityInspection>('inspector', 'Inspector', { width: 140 }),
       createActionColumn<QualityInspection>(
         ({ row }) => {
-          if (row.disposition === 'HOLD' && onReleaseQc) {
+          if (row.disposition === 'HOLD') {
+            if (!canReleaseQc) {
+              return (
+                <span
+                  className="text-slate-400 dark:text-slate-500 text-[11px] font-mono italic"
+                  title="Requires quality.inspection.release permission"
+                >
+                  Pending Auth
+                </span>
+              );
+            }
             return (
               <div className="flex items-center justify-end gap-1.5">
                 <button
                   onClick={() =>
-                    onReleaseQc(
+                    handleReleaseQc(
                       row.id,
                       'PASS',
                       'UNRESTRICTED',
@@ -147,7 +200,7 @@ export const QualityView: React.FC<QualityViewProps> = ({
                 </button>
                 <button
                   onClick={() =>
-                    onReleaseQc(
+                    handleReleaseQc(
                       row.id,
                       'FAIL',
                       'REJECT',
@@ -171,7 +224,7 @@ export const QualityView: React.FC<QualityViewProps> = ({
         { width: 170, headerName: 'Disposition Action' }
       ),
     ],
-    [onReleaseQc]
+    [handleReleaseQc, canReleaseQc]
   );
 
   // 2. NCR Columns
@@ -290,7 +343,7 @@ export const QualityView: React.FC<QualityViewProps> = ({
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
         >
-          Quality Inspections ({inspections.length})
+          Quality Inspections ({effectiveInspections.length})
         </button>
         <button
           onClick={() => onSelectSubTab('reject-scrap')}
@@ -300,7 +353,7 @@ export const QualityView: React.FC<QualityViewProps> = ({
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
         >
-          Non-Conformance Reports (NCR) ({ncrs.length})
+          Non-Conformance Reports (NCR) ({effectiveNcrs.length})
         </button>
         <button
           onClick={() => onSelectSubTab('rework')}
@@ -340,7 +393,7 @@ export const QualityView: React.FC<QualityViewProps> = ({
           </div>
 
           <EnterpriseDataGrid<QualityInspection>
-            data={inspections}
+            data={effectiveInspections}
             columns={inspectionColumns}
             pagination
             searchable
@@ -367,7 +420,7 @@ export const QualityView: React.FC<QualityViewProps> = ({
           </div>
 
           <EnterpriseDataGrid<NonConformanceReport>
-            data={ncrs}
+            data={effectiveNcrs}
             columns={ncrColumns}
             pagination
             searchable

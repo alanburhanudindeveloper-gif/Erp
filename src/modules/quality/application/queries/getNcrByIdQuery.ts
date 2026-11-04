@@ -10,10 +10,11 @@ export interface GetNcrByIdQueryParams {
 export class GetNcrByIdHandler {
   constructor(private readonly qualityRepo: IQualityRepository) {}
 
-  execute(params: GetNcrByIdQueryParams): Result<NonConformanceReport, DomainError> {
-    const ncr = this.qualityRepo.findNcrById(params.id);
+  execute(params: GetNcrByIdQueryParams | string): Result<NonConformanceReport, DomainError> {
+    const id = typeof params === 'string' ? params : params?.id;
+    const ncr = this.qualityRepo.findNcrById(id);
     if (!ncr) {
-      return fail(new NotFoundError('NonConformanceReport', params.id));
+      return fail(new NotFoundError('NonConformanceReport', id));
     }
     return ok(ncr);
   }

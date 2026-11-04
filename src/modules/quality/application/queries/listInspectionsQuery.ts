@@ -40,7 +40,7 @@ export class ListInspectionsHandler {
       items = items.filter((i) => i.result === params.result);
     }
 
-    if (params.disposition && params.disposition !== 'ALL') {
+    if (params.disposition && (params.disposition as string) !== 'ALL') {
       items = items.filter((i) => i.disposition === params.disposition);
     }
 

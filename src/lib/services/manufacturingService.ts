@@ -1129,100 +1129,58 @@ export function useErpStore() {
     [state.purchaseOrders, state.goodsReceiptNotes.length, state.products, state.currentUser, state.inspections.length, addNotification]
   );
 
-  // 17. Release QC Inspection (UC-QA-001..003: Moves stock from HOLD to AVAILABLE or creates NCR)
+  // 17. Release QC Inspection (Delegated to CQRS ReleaseQcInspectionHandler)
   const releaseQcInspection = useCallback(
     (inspectionId: string, decision: 'PASS' | 'FAIL', disposition: 'UNRESTRICTED' | 'HOLD' | 'REJECT' | 'REWORK', notes: string) => {
-      const qc = state.inspections.find((i) => i.id === inspectionId);
-      if (!qc) return;
+      const outcome = erpApplication.quality.releaseQcInspection.execute({
+        inspectionId,
+        decision,
+        disposition,
+        notes,
+        actor: state.currentUser.name,
+        role: state.currentUser.role,
+      });
+
+      if (!outcome.isSuccess) {
+        addNotification('error', outcome.error.message);
+        return;
+      }
+
+      const { inspection: updatedQc, movement: newMovement, ncr: newNcr } = outcome.value;
 
       const now = new Date();
       const timeStr = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 
-      const newMovements: StockMovement[] = [];
-      const newNcrs: NonConformanceReport[] = [];
-
-      if (decision === 'PASS' && disposition === 'UNRESTRICTED') {
-        // Transfer stock from HOLD to AVAILABLE
-        newMovements.push({
-          id: `mov-${Date.now()}-rel`,
-          movementNo: `MATDOC-REL-${Date.now().toString().slice(-5)}`,
-          timestamp: timeStr,
-          productId: qc.productId,
-          sku: qc.sku,
-          quantity: qc.sampleSize * 20, // batch release
-          uom: 'KG',
-          fromLocation: 'PLANT01-RM-WH-HOLD',
-          toLocation: 'PLANT01-RM-WH-AVAILABLE',
-          lotNumber: qc.lotNumber,
-          sourceDocument: qc.inspectionNo,
-          movementType: 'TRANSFER',
-          stockBucket: 'AVAILABLE',
-        });
-      } else if (decision === 'FAIL') {
-        // Spawn Non-Conformance Report (NCR)
-        newNcrs.push({
-          id: `ncr-${Date.now()}`,
-          ncrNo: `NCR-2026-0${19 + state.ncrs.length}`,
-          orderNumber: qc.sourceRef,
-          lotNumber: qc.lotNumber,
-          productSku: qc.sku,
-          defectDescription: notes || 'Material failed IQC metallurgical specification test.',
-          rootCause: 'Supplier alloy deviation outside acceptable tolerance range.',
-          quantityAffected: qc.sampleSize * 10,
-          disposition: disposition === 'REWORK' ? 'REWORK' : 'SCRAP',
-          status: 'OPEN',
-          createdAt: timeStr,
-        });
-      }
-
       const audit: AuditLogEntry = {
         id: `aud-${Date.now()}`,
-        documentId: qc.inspectionNo,
+        documentId: updatedQc.inspectionNo,
         documentType: 'QUALITY_INSPECTION',
         action: 'RELEASE_QC_DISPOSITION',
         actor: state.currentUser.name,
         role: 'Quality Lead',
         timestamp: timeStr,
-        oldStatus: qc.disposition,
+        oldStatus: updatedQc.disposition,
         newStatus: disposition,
         decision: decision === 'PASS' ? 'APPROVED' : 'FLAGGED',
         reason: notes || `QC evaluation complete: Result ${decision}, Disposition ${disposition}.`,
       };
 
-      newMovements.forEach((m) => inventoryRepository.recordMovement(m));
-      newNcrs.forEach((n) => qualityRepository.saveNcr(n));
-      qualityRepository.saveInspection({
-        ...qc,
-        result: decision,
-        disposition,
-        inspector: state.currentUser.name,
-        notes: `${qc.notes || ''} [Decision: ${decision}/${disposition}] ${notes}`,
-      });
-
       setState((prev) => ({
         ...prev,
         inspections: prev.inspections.map((i) =>
-          i.id === inspectionId
-            ? {
-                ...i,
-                result: decision,
-                disposition,
-                inspector: prev.currentUser.name,
-                notes: `${i.notes || ''} [Decision: ${decision}/${disposition}] ${notes}`,
-              }
-            : i
+          i.id === inspectionId ? updatedQc : i
         ),
-        stockMovements: [...newMovements, ...prev.stockMovements],
-        ncrs: [...newNcrs, ...prev.ncrs],
+        stockMovements: newMovement ? [newMovement, ...prev.stockMovements] : prev.stockMovements,
+        ncrs: newNcr ? [newNcr, ...prev.ncrs] : prev.ncrs,
         auditLogs: [audit, ...prev.auditLogs],
       }));
 
       addNotification(
         decision === 'PASS' ? 'success' : 'error',
-        `QC Inspection ${qc.inspectionNo} updated: ${decision} (${disposition}). Stock ledger updated.`
+        `QC Inspection ${updatedQc.inspectionNo} updated: ${decision} (${disposition}). Stock ledger updated.`
       );
     },
-    [state.inspections, state.ncrs.length, state.currentUser, addNotification]
+    [state.currentUser, addNotification]
   );
 
   // 18. Issue Material to Production Order (UC-INV-003 & BR-INV-003 Prevention of Hold Stock Issue)

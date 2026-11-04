@@ -1,9 +1,14 @@
 import { verifyErpToken, type ErpTokenPayload } from './tokenService';
+import type { SecurityScopeContext } from './permissionModel';
+import { roleRegistry, type SecurityUser } from './roleModel';
+import { authorizationEngine, type AuthorizationDecision } from './authorizationEngine';
 
 export interface ErpSession {
   userId: string;
-  role: string;
+  role: string; // primary role (backwards compatibility)
+  roles: string[]; // all assigned roles
   organizationId: string;
+  plantScope?: string[];
   permissions: string[];
   authorized: boolean;
 }
@@ -67,13 +72,15 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   Operator: [
     'WORKFLOW_VIEW',
   ],
+  Viewer: [
+    'WORKFLOW_VIEW',
+  ],
 };
 
 function normalizeRole(role?: string): string | undefined {
   if (!role) {
     return undefined;
   }
-
   const value = role.trim();
   return value || undefined;
 }
@@ -82,43 +89,115 @@ function dedupe(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
 
-export function validateErpSession(session: Partial<ErpSession>): ErpSession & { authorized: boolean } {
-  const role = normalizeRole(session.role);
+/**
+ * Validates and transforms session or candidate credentials into a typed ErpSession.
+ * Aggregates permissions from all assigned user roles (multi-role support) and role registry.
+ */
+export function validateErpSession(
+  session: Partial<ErpSession> & { roles?: string[]; plantScope?: string[] }
+): ErpSession & { authorized: boolean } {
+  const candidateRoles: string[] = [];
+  if (session.roles && Array.isArray(session.roles) && session.roles.length > 0) {
+    candidateRoles.push(...session.roles);
+  } else if (session.role) {
+    candidateRoles.push(session.role);
+  }
+
+  const normalizedRoles = candidateRoles
+    .map(normalizeRole)
+    .filter((r): r is string => Boolean(r));
+
   const organizationId = session.organizationId?.trim();
   const userId = session.userId?.trim();
 
-  if (!userId || !role || !organizationId) {
+  if (!userId || normalizedRoles.length === 0 || !organizationId) {
     return {
       userId: userId || 'unknown-user',
-      role: role || 'UNAUTHORIZED',
+      role: normalizedRoles[0] || 'UNAUTHORIZED',
+      roles: normalizedRoles,
       organizationId: organizationId || 'unknown-organization',
+      plantScope: session.plantScope || ['*'],
       permissions: [],
       authorized: false,
     };
   }
 
-  const basePermissions = DEFAULT_ROLE_PERMISSIONS[role] || [];
+  // 1. Collect legacy uppercase permissions from all roles
+  const legacyPermissions: string[] = [];
+  for (const r of normalizedRoles) {
+    const roleBase = DEFAULT_ROLE_PERMISSIONS[r] || [];
+    legacyPermissions.push(...roleBase);
+  }
+
+  // 2. Collect granular <resource>.<action> permissions from role registry
+  const granularPermissions = roleRegistry.getPermissionsForRoles(normalizedRoles);
+
+  // 3. Merge with any token-provided direct permissions
+  const directPermissions = session.permissions || [];
+
   const permissions = dedupe([
-    ...basePermissions,
-    ...(session.permissions || []),
+    ...legacyPermissions,
+    ...granularPermissions,
+    ...directPermissions,
   ]);
 
   return {
     userId,
-    role,
+    role: normalizedRoles[0],
+    roles: normalizedRoles,
     organizationId,
+    plantScope: session.plantScope || ['*'],
     permissions,
     authorized: true,
   };
 }
 
-export function hasPermission(session: Partial<ErpSession>, permission: string): boolean {
+/**
+ * Converts an ErpSession into a SecurityUser representation for authorization evaluations.
+ */
+export function toSecurityUser(session: Partial<ErpSession>): SecurityUser | null {
+  const valid = validateErpSession(session);
+  if (!valid.authorized) {
+    return null;
+  }
+  return {
+    userId: valid.userId,
+    roles: valid.roles,
+    organizationId: valid.organizationId,
+    plantScope: valid.plantScope,
+    directPermissions: valid.permissions,
+  };
+}
+
+/**
+ * Checks whether a session holds a specific permission, optionally scoped to context.
+ */
+export function hasPermission(
+  session: Partial<ErpSession>,
+  permission: string,
+  context?: SecurityScopeContext
+): boolean {
   const validSession = validateErpSession(session);
   if (!validSession.authorized) {
     return false;
   }
 
-  return validSession.permissions.includes(permission);
+  // Fast-path: direct permission array check (case-insensitive)
+  const cleanTarget = permission.trim().toLowerCase();
+  const directMatch = validSession.permissions.some(
+    (p) => p.toLowerCase() === cleanTarget || p === '*'
+  );
+  if (!context && directMatch) {
+    return true;
+  }
+
+  // Engine evaluation including scope context
+  const securityUser = toSecurityUser(validSession);
+  if (!securityUser) {
+    return false;
+  }
+
+  return authorizationEngine.can(securityUser, permission, context).allowed;
 }
 
 export function readHeaderValue(
@@ -129,7 +208,9 @@ export function readHeaderValue(
     return undefined;
   }
 
-  const matchedKey = Object.keys(headers).find((headerKey) => headerKey.toLowerCase() === key.toLowerCase());
+  const matchedKey = Object.keys(headers).find(
+    (headerKey) => headerKey.toLowerCase() === key.toLowerCase()
+  );
   const value = matchedKey ? headers[matchedKey] : undefined;
 
   if (Array.isArray(value)) {
@@ -163,7 +244,8 @@ export function authorizeRequest(
     session?: Partial<ErpSession>;
   },
   requiredRoles: string[] = [],
-  requiredPermission?: string
+  requiredPermission?: string,
+  context?: SecurityScopeContext
 ): AuthorizationResult {
   let candidateSession: ErpSession & { authorized: boolean };
 
@@ -205,18 +287,24 @@ export function authorizeRequest(
     };
   }
 
-  if (requiredPermission && !hasPermission(candidateSession, requiredPermission)) {
-    return {
-      authorized: false,
-      code: 'FORBIDDEN_PERMISSION',
-      reason: `The caller does not have permission '${requiredPermission}'.`,
-      session: candidateSession,
-    };
+  // 1. Permission authorization check
+  if (requiredPermission) {
+    const user = toSecurityUser(candidateSession);
+    const decision = authorizationEngine.can(user, requiredPermission, context);
+    if (!decision.allowed) {
+      return {
+        authorized: false,
+        code: decision.code || 'FORBIDDEN_PERMISSION',
+        reason: decision.reason || `The caller does not have permission '${requiredPermission}'.`,
+        session: candidateSession,
+      };
+    }
   }
 
+  // 2. Role authorization check (for backwards compatibility)
   if (requiredRoles.length > 0) {
     const normalizedRoles = requiredRoles.map((role) => role.trim());
-    const roleAllowed = normalizedRoles.includes(candidateSession.role);
+    const roleAllowed = candidateSession.roles.some((r) => normalizedRoles.includes(r));
 
     if (!roleAllowed) {
       return {
@@ -234,16 +322,24 @@ export function authorizeRequest(
   };
 }
 
+export interface RequireErpAuthOptions {
+  requiredRoles?: string[];
+  requiredPermission?: string;
+  requiredPermissions?: string[];
+  scopeResolver?: (req: any) => SecurityScopeContext | undefined;
+}
+
 /**
  * Express middleware enforcing server-verified Bearer authentication & RBAC.
  * Rejects unauthenticated requests with 401 and role/permission violations with 403.
  * Discards client-controlled identity headers to prevent spoofing.
  */
-export function requireErpAuth(options: { requiredRoles?: string[]; requiredPermission?: string } = {}) {
+export function requireErpAuth(options: RequireErpAuthOptions = {}) {
   return (
     req: {
       headers?: Record<string, string | string[] | undefined>;
       session?: Partial<ErpSession>;
+      [key: string]: any;
     },
     res: {
       status: (code: number) => { json: (payload: unknown) => unknown };
@@ -279,18 +375,38 @@ export function requireErpAuth(options: { requiredRoles?: string[]; requiredPerm
 
     // Client-supplied spoofing headers are completely ignored
     req.session = session;
+    const securityUser = toSecurityUser(session);
+    const context = options.scopeResolver ? options.scopeResolver(req) : undefined;
 
-    if (options.requiredPermission && !hasPermission(session, options.requiredPermission)) {
-      return res.status(403).json({
-        error: `The caller does not have permission '${options.requiredPermission}'.`,
-        code: 'FORBIDDEN_PERMISSION',
-        authorized: false,
-      });
+    // 1. Check fine-grained singular permission if specified
+    if (options.requiredPermission) {
+      const decision = authorizationEngine.can(securityUser, options.requiredPermission, context);
+      if (!decision.allowed) {
+        return res.status(403).json({
+          error: decision.reason || `The caller does not have permission '${options.requiredPermission}'.`,
+          code: decision.code || 'FORBIDDEN_PERMISSION',
+          authorized: false,
+        });
+      }
     }
 
+    // 2. Check multiple required permissions if specified
+    if (options.requiredPermissions && options.requiredPermissions.length > 0) {
+      const decision = authorizationEngine.canAll(securityUser, options.requiredPermissions, context);
+      if (!decision.allowed) {
+        return res.status(403).json({
+          error: decision.reason || `The caller lacks required permissions: ${options.requiredPermissions.join(', ')}`,
+          code: decision.code || 'FORBIDDEN_PERMISSION',
+          authorized: false,
+        });
+      }
+    }
+
+    // 3. Check roles if specified
     if (options.requiredRoles && options.requiredRoles.length > 0) {
       const normalizedRoles = options.requiredRoles.map((r) => r.trim());
-      if (!normalizedRoles.includes(session.role)) {
+      const roleAllowed = session.roles.some((r) => normalizedRoles.includes(r));
+      if (!roleAllowed) {
         return res.status(403).json({
           error: `The caller role '${session.role}' is not allowed. Required role: ${normalizedRoles.join(' or ')}.`,
           code: 'FORBIDDEN_ROLE',

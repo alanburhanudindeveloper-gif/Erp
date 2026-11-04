@@ -350,12 +350,14 @@ test('ERP Server HTTP API: Material Requests End-to-End CQRS & Lifecycle', async
   }
 });
 
-test('ERP Storage Adapter: Authoritative Material Requests, Production Orders, and Stock Movements are sanitized from localStorage', () => {
+test('ERP Storage Adapter: Authoritative Material Requests, Production Orders, Stock Movements, Inspections, and NCRs are sanitized from localStorage', () => {
   const dummyState = {
     productionOrders: [{ id: 'mo-local-fake', orderNumber: 'MO-FAKE' }],
     materialRequests: [{ id: 'mr-local-fake', requestNumber: 'MR-FAKE' }],
     purchaseRequisitions: [{ id: 'pr-local-fake', prNumber: 'PR-FAKE' }],
     stockMovements: [{ id: 'mov-local-fake', movementNo: 'MOV-FAKE' }],
+    inspections: [{ id: 'qc-local-fake', inspectionNo: 'INS-FAKE' }],
+    ncrs: [{ id: 'ncr-local-fake', ncrNo: 'NCR-FAKE' }],
     otherField: 'preserved_value',
   };
 
@@ -368,6 +370,8 @@ test('ERP Storage Adapter: Authoritative Material Requests, Production Orders, a
   assert.equal((loaded as any).materialRequests, undefined, 'materialRequests must be stripped from local storage');
   assert.equal((loaded as any).purchaseRequisitions, undefined, 'purchaseRequisitions must be stripped from local storage');
   assert.equal((loaded as any).stockMovements, undefined, 'stockMovements must be stripped from local storage');
+  assert.equal((loaded as any).inspections, undefined, 'inspections must be stripped from local storage');
+  assert.equal((loaded as any).ncrs, undefined, 'ncrs must be stripped from local storage');
 });
 
 test('ERP Server API End-to-End: Inventory Balances, Movements, Transfers, and Reversals', async () => {
@@ -469,4 +473,134 @@ test('ERP Server API End-to-End: Inventory Balances, Movements, Transfers, and R
     await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   }
 });
+
+test('ERP Server API End-to-End: Quality Inspections, NCRs, Evaluations, Release, and RBAC', async () => {
+  const testApp = express();
+  testApp.use(express.json());
+  testApp.use('/api/erp', erpRouter);
+
+  const server = http.createServer(testApp);
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const port = address.port;
+
+  const qualityLeadClient = new ErpApiClient({ baseUrl: `http://localhost:${port}`, defaultRole: 'Supervisor' });
+  const viewerClient = new ErpApiClient({ baseUrl: `http://localhost:${port}`, defaultRole: 'Viewer' });
+
+  try {
+    // 1. Query initial inspections list
+    const initialInspections = await qualityLeadClient.quality.listInspections({ page: 1, limit: 10 });
+    assert.ok(Array.isArray(initialInspections.items), 'Inspections items must be an array');
+    const startCount = initialInspections.total;
+
+    // 2. Evaluate an inspection with an out-of-tolerance defect (triggers NCR requirement)
+    const evalResult = await qualityLeadClient.quality.evaluateInspection({
+      sourceType: 'PRODUCTION_ORDER',
+      sourceRef: 'MO-2026-EVAL-API',
+      productId: 'prd-001',
+      sku: 'FG-001',
+      productName: 'Flow Sensor Unit',
+      lotNumber: 'LOT-FAIL-API-01',
+      operationName: 'Final Assembly Test',
+      sampleSize: 10,
+      defectsCount: 3,
+      maxAllowedDefects: 0,
+      characteristic: 'Pressure Tolerance',
+      specification: '50 PSI ± 1',
+      measuredValue: 55,
+      lowerTolerance: 49,
+      upperTolerance: 51,
+      inspector: 'Supervisor Hendra',
+    });
+
+    assert.ok(evalResult.inspection.id);
+    assert.equal(evalResult.inspection.result, 'FAIL');
+    assert.equal(evalResult.ncrRequired, true);
+
+    // 3. Query inspection by ID
+    const singleInspection = await qualityLeadClient.quality.getInspection(evalResult.inspection.id);
+    assert.equal(singleInspection.id, evalResult.inspection.id);
+    assert.equal(singleInspection.sku, 'FG-001');
+
+    // 4. Query updated inspections list
+    const updatedInspections = await qualityLeadClient.quality.listInspections({ page: 1, limit: 10 });
+    assert.equal(updatedInspections.total, startCount + 1);
+
+    // 5. Release / Reject inspection disposition via API
+    const releaseResult = await qualityLeadClient.quality.releaseInspection(evalResult.inspection.id, {
+      decision: 'FAIL',
+      disposition: 'REJECT',
+      notes: 'Confirmed pressure sensor casing crack, reject to quarantine ledger',
+      actor: 'Supervisor Hendra',
+      role: 'Supervisor',
+    });
+
+    assert.equal(releaseResult.inspection.result, 'FAIL');
+    assert.equal(releaseResult.inspection.disposition, 'REJECT');
+    assert.ok(releaseResult.ncr);
+    assert.ok(releaseResult.movement);
+
+    // 6. Query NCRs list
+    const ncrsList = await qualityLeadClient.quality.listNcrs({ status: 'OPEN' });
+    assert.ok(ncrsList.total >= 1);
+    const createdNcr = ncrsList.items.find((n) => n.id === releaseResult.ncr?.id);
+    assert.ok(createdNcr);
+
+    // 7. Get single NCR by ID
+    const singleNcr = await qualityLeadClient.quality.getNcr(createdNcr.id);
+    assert.equal(singleNcr.id, createdNcr.id);
+    assert.equal(singleNcr.status, 'OPEN');
+
+    // 8. Resolve NCR
+    const resolvedNcrResult = await qualityLeadClient.quality.resolveNcr(createdNcr.id, {
+      disposition: 'SCRAP',
+      rootCause: 'Defective brass casting mold wear',
+      resolver: 'Supervisor Hendra',
+    });
+    assert.equal(resolvedNcrResult.resolvedNcr.status, 'RESOLVED');
+
+    // Verify NCR is no longer OPEN
+    const afterResolveNcr = await qualityLeadClient.quality.getNcr(createdNcr.id);
+    assert.equal(afterResolveNcr.status, 'RESOLVED');
+
+    // 9. Role-Based Access Control: Viewer role cannot evaluate or release inspections
+    await assert.rejects(
+      async () => {
+        await viewerClient.quality.evaluateInspection({
+          sourceType: 'PRODUCTION_ORDER',
+          sourceRef: 'MO-VIEWER',
+          productId: 'prd-001',
+          sku: 'FG-001',
+          productName: 'Flow Sensor Unit',
+          lotNumber: 'LOT-V1',
+          operationName: 'Op1',
+          sampleSize: 1,
+          defectsCount: 0,
+          maxAllowedDefects: 0,
+          characteristic: 'Test',
+          specification: 'Spec',
+          inspector: 'Viewer',
+        });
+      },
+      /is not allowed|FORBIDDEN|Access denied/i,
+      'Viewer role must not be permitted to evaluate inspections'
+    );
+
+    await assert.rejects(
+      async () => {
+        await viewerClient.quality.releaseInspection(evalResult.inspection.id, {
+          decision: 'PASS',
+          disposition: 'UNRESTRICTED',
+          actor: 'Viewer User',
+        });
+      },
+      /is not allowed|FORBIDDEN|Access denied/i,
+      'Viewer role must not be permitted to release inspections'
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  }
+});
+
 

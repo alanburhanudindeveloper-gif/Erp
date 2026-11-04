@@ -10,10 +10,11 @@ export interface GetInspectionByIdQueryParams {
 export class GetInspectionByIdHandler {
   constructor(private readonly qualityRepo: IQualityRepository) {}
 
-  execute(params: GetInspectionByIdQueryParams): Result<QualityInspection, DomainError> {
-    const inspection = this.qualityRepo.findInspectionById(params.id);
+  execute(params: GetInspectionByIdQueryParams | string): Result<QualityInspection, DomainError> {
+    const id = typeof params === 'string' ? params : params?.id;
+    const inspection = this.qualityRepo.findInspectionById(id);
     if (!inspection) {
-      return fail(new NotFoundError('QualityInspection', params.id));
+      return fail(new NotFoundError('QualityInspection', id));
     }
     return ok(inspection);
   }
