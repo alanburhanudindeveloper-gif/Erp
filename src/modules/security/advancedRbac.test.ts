@@ -333,7 +333,7 @@ test('Advanced RBAC: Authorization failure is distinct from business validation 
     });
     assert.equal(bizFailResponse.status, 400);
     const bizFailBody = await bizFailResponse.json();
-    assert.match(bizFailBody.error, /Root cause explanation must be at least 10 characters|NCR with identifier/i);
+    assert.match(bizFailBody.error, /Root cause explanation must be at least 10 characters|NonConformanceReport with identifier|NCR with identifier/i);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   }

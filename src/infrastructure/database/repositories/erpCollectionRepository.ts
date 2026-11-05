@@ -30,10 +30,10 @@ export function createErpCollectionRepository<T extends object>(
     upsert: (record, idKey = 'id' as keyof T) => repository.upsert(collectionName, record, idKey),
     remove: (id) => repository.remove(collectionName, id),
     clear: () => repository.clear(collectionName),
-    createSnapshot: () => repository.list(collectionName).map((record) => ({ ...(record as object) }) as T),
+    createSnapshot: () => structuredClone(repository.list(collectionName)),
     restoreSnapshot: (snapshot: unknown) => {
       if (Array.isArray(snapshot)) {
-        repository.save(collectionName, snapshot as T[]);
+        repository.save(collectionName, structuredClone(snapshot as T[]));
       }
     },
   };

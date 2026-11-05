@@ -14,6 +14,38 @@ import type { InventoryBalanceItem } from '../../modules/inventory/application/q
 import type { InspectionEvaluationInput, InspectionEvaluationResult, NcrResolutionResult } from '../../modules/quality/qualityService';
 import type { ReleaseQcInspectionResult } from '../../modules/quality/application/commands/releaseQcInspectionCommand';
 
+export interface LoginResponse {
+  token: string;
+  tokenType: 'Bearer';
+  expiresIn: number;
+  user: {
+    userId: string;
+    username: string;
+    email: string;
+    fullName: string;
+    roles: string[];
+    plantScope: string[];
+    organizationId: string;
+    status: 'ACTIVE' | 'DISABLED' | 'SUSPENDED';
+  };
+}
+
+export interface MeResponse {
+  authenticated: boolean;
+  user: {
+    userId: string;
+    username?: string;
+    email?: string;
+    fullName?: string;
+    role: string;
+    roles?: string[];
+    plantScope?: string[];
+    organizationId: string;
+    permissions: string[];
+    status?: string;
+  };
+}
+
 export interface ApiClientConfig {
   baseUrl?: string;
   defaultRole?: string;
@@ -30,12 +62,20 @@ export class ErpApiClient {
     this.baseUrl = config.baseUrl ?? '';
     this.currentRole = config.defaultRole ?? 'Planner';
     this.token = config.token ?? null;
+
+    if (!this.token && typeof window !== 'undefined' && window.sessionStorage) {
+      try {
+        this.token = window.sessionStorage.getItem('kranex_erp_token');
+      } catch {
+        // Restricted storage fallback
+      }
+    }
   }
 
   setRole(role: string): void {
     if (this.currentRole !== role) {
       this.currentRole = role;
-      this.token = null;
+      this.setToken(null);
     }
   }
 
@@ -45,11 +85,87 @@ export class ErpApiClient {
 
   setToken(token: string | null): void {
     this.token = token;
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      try {
+        if (token) {
+          window.sessionStorage.setItem('kranex_erp_token', token);
+        } else {
+          window.sessionStorage.removeItem('kranex_erp_token');
+        }
+      } catch {
+        // Restricted storage fallback
+      }
+    }
   }
 
   getToken(): string | null {
     return this.token;
   }
+
+  /**
+   * Performs server-verified credential authentication.
+   */
+  async login(credentials: { identifier: string; password: string }): Promise<LoginResponse> {
+    const response = await fetch(`${this.baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credentials),
+    });
+
+    if (!response.ok) {
+      let errorMessage = 'Invalid credentials.';
+      try {
+        const errorJson = await response.json();
+        if (errorJson && typeof errorJson.error === 'string') {
+          errorMessage = errorJson.error;
+        }
+      } catch {
+        // Fallback message
+      }
+      throw new Error(errorMessage);
+    }
+
+    const data = (await response.json()) as LoginResponse;
+    this.setToken(data.token);
+    if (data.user?.roles?.[0]) {
+      this.currentRole = data.user.roles[0];
+    }
+    return data;
+  }
+
+  /**
+   * Signs out current user session.
+   */
+  async logout(): Promise<void> {
+    try {
+      if (this.token) {
+        await fetch(`${this.baseUrl}/api/auth/logout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.token}`,
+          },
+        });
+      }
+    } catch {
+      // Continue clearing local token
+    } finally {
+      this.setToken(null);
+    }
+  }
+
+  /**
+   * Resolves current verified user profile from server.
+   */
+  async getMe(): Promise<MeResponse> {
+    return this.request<MeResponse>('/api/auth/me');
+  }
+
+  readonly auth = {
+    login: (credentials: { identifier: string; password: string }) => this.login(credentials),
+    logout: () => this.logout(),
+    getMe: () => this.getMe(),
+  };
 
   /**
    * Securely acquires a signed development Bearer token from the server auth endpoint.

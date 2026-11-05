@@ -35,3 +35,7 @@ export class AuthorizationError extends DomainError {
 export class InvariantViolationError extends DomainError {
   readonly code = 'INVARIANT_VIOLATION_ERROR';
 }
+
+export class AuthenticationError extends DomainError {
+  readonly code = 'AUTHENTICATION_ERROR';
+}

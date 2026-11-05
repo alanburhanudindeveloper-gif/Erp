@@ -6,3 +6,4 @@ export * from './qualityService';
 export * from './application';
 export * from './presentation/hooks';
 export * from './security/qualityPermissions';
+export * from './qualityModule';

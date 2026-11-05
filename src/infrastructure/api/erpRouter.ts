@@ -31,9 +31,52 @@ erpRouter.get('/health', (_req, res) => {
   });
 });
 
+import {
+  loginCommandHandler,
+  logoutCommandHandler,
+  userRepository,
+} from '../../modules/security';
+
 /* -------------------------------------------------------------
    AUTHENTICATION & CREDENTIAL VERIFICATION
 ------------------------------------------------------------- */
+erpRouter.post('/auth/login', (req, res) => {
+  const { identifier, password } = req.body || {};
+  const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress;
+  const userAgent = req.headers['user-agent'];
+
+  const result = loginCommandHandler.execute({
+    identifier,
+    password,
+    ipAddress,
+    userAgent,
+  });
+
+  if (result.isSuccess) {
+    res.json(result.value);
+  } else {
+    const error = result.error;
+    if (error.name === 'ValidationError') {
+      res.status(400).json({ error: error.message, code: 'VALIDATION_ERROR' });
+    } else {
+      res.status(401).json({ error: error.message, code: 'INVALID_CREDENTIALS' });
+    }
+  }
+});
+
+erpRouter.post('/auth/logout', (req, res) => {
+  const session = (req as any).session;
+  const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress;
+
+  logoutCommandHandler.execute({
+    userId: session?.userId,
+    roles: session?.roles,
+    ipAddress,
+  });
+
+  res.json({ success: true, message: 'Logged out successfully.' });
+});
+
 erpRouter.post('/auth/token', (req, res) => {
   const { role = 'Planner', userId, organizationId = 'default-org' } = req.body || {};
   const token = createDevToken(role, userId, organizationId);
@@ -50,10 +93,31 @@ erpRouter.post('/auth/token', (req, res) => {
 });
 
 erpRouter.get('/auth/me', requireErpAuth(), (req, res) => {
-  res.json({
-    authenticated: true,
-    user: (req as any).session,
-  });
+  const session = (req as any).session;
+  const userAccount = userRepository.findById(session.userId);
+
+  if (userAccount) {
+    res.json({
+      authenticated: true,
+      user: {
+        userId: userAccount.id,
+        username: userAccount.username,
+        email: userAccount.email,
+        fullName: userAccount.fullName,
+        role: session.role,
+        roles: userAccount.roles,
+        plantScope: userAccount.plantScope,
+        organizationId: session.organizationId,
+        permissions: session.permissions,
+        status: userAccount.isActive ? 'ACTIVE' : 'DISABLED',
+      },
+    });
+  } else {
+    res.json({
+      authenticated: true,
+      user: session,
+    });
+  }
 });
 
 /* -------------------------------------------------------------
@@ -117,7 +181,7 @@ erpRouter.get(
 
 erpRouter.get(
   '/quality',
-  requireErpAuth({ requiredRoles: ['Quality Lead', 'Supervisor', 'Plant Manager'] }),
+  requireErpAuth({ requiredPermission: QUALITY_PERMISSIONS.INSPECTION_READ }),
   (_req, res) => {
     res.json({ quality: getQualityOverview() });
   }

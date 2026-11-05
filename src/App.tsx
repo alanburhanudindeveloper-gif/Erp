@@ -23,8 +23,10 @@ import { WorkflowView } from './modules/workflow/WorkflowView';
 import { SettingsView } from './modules/settings/SettingsView';
 import { AiBudgetTelemetryModal } from './components/ai/AiBudgetTelemetryModal';
 import { Bell, X } from 'lucide-react';
+import { AuthProvider, useAuth, LoginView } from './modules/security';
 
-export default function App() {
+function ErpPlatformApp() {
+  const { isAuthenticated, isLoading } = useAuth();
   const {
     state,
     setPlant,
@@ -153,6 +155,21 @@ export default function App() {
       : activeNav === 'testing'
       ? 'Testing Matrix'
       : 'Panduan Alur ERP';
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-slate-900 text-white font-mono text-sm">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-slate-400 text-xs">Authenticating ERP session...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginView />;
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-slate-50 text-slate-900 font-sans antialiased">
@@ -484,5 +501,13 @@ export default function App() {
         onClose={() => setShowAiBudgetModal(false)}
       />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <ErpPlatformApp />
+    </AuthProvider>
   );
 }

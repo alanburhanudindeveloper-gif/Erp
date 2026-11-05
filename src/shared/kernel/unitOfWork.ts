@@ -3,6 +3,13 @@
  * Defines atomic transaction boundaries for application commands, providing
  * an explicit seam for ACID transactions in relational persistence (PostgreSQL / Drizzle)
  * and atomic Outbox event writes.
+ *
+ * ARCHITECTURAL PERSISTENCE BOUNDARY & GUARANTEES:
+ * - The current implementation (InMemoryUnitOfWork) provides in-memory snapshot-based rollback
+ *   for transactional consistency within the running Node.js process.
+ * - It does NOT claim durable persistence (no disk write, no restart durability, no RDBMS ACID isolation).
+ * - Multi-repository mutations either all commit or all roll back in memory, preventing partial in-process state corruption.
+ * - Relational persistence with true database transaction guarantees is targeted for PostgreSQL in Phase 5.
  */
 
 export interface ITransactionalParticipant {

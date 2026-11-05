@@ -66,8 +66,8 @@ export const QualityView: React.FC<QualityViewProps> = ({
   const canReleaseQc = can('quality.inspection.release');
   const canResolveNcr = can('quality.ncr.resolve');
 
-  const effectiveInspections = serverInspections && serverInspections.length > 0 ? serverInspections : inspections;
-  const effectiveNcrs = serverNcrs && serverNcrs.length > 0 ? serverNcrs : ncrs;
+  const effectiveInspections = serverInspections !== null && serverInspections !== undefined ? serverInspections : inspections;
+  const effectiveNcrs = serverNcrs !== null && serverNcrs !== undefined ? serverNcrs : ncrs;
 
   const handleReleaseQc = async (
     inspectionId: string,
@@ -510,7 +510,7 @@ export const QualityView: React.FC<QualityViewProps> = ({
         lotData={rootCauseModal.lotData}
         operatorData={rootCauseModal.operatorData}
         onCreateCapa={() => {
-          alert(`CAPA Ticket registered from AI root-cause analysis! Containment action dispatched to shop floor lead.`);
+          setRootCauseModal((prev) => ({ ...prev, isOpen: false }));
         }}
       />
     </div>

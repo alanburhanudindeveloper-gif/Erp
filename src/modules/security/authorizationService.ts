@@ -266,7 +266,9 @@ export function authorizeRequest(
       candidateSession = validateErpSession({
         userId: verification.payload.userId,
         role: verification.payload.role,
+        roles: verification.payload.roles,
         organizationId: verification.payload.organizationId,
+        plantScope: verification.payload.plantScope,
         permissions: verification.payload.permissions || [],
       });
     } else {
@@ -294,7 +296,7 @@ export function authorizeRequest(
     if (!decision.allowed) {
       return {
         authorized: false,
-        code: decision.code || 'FORBIDDEN_PERMISSION',
+        code: 'FORBIDDEN_PERMISSION',
         reason: decision.reason || `The caller does not have permission '${requiredPermission}'.`,
         session: candidateSession,
       };
@@ -369,7 +371,9 @@ export function requireErpAuth(options: RequireErpAuthOptions = {}) {
     const session = validateErpSession({
       userId: verification.payload.userId,
       role: verification.payload.role,
+      roles: verification.payload.roles,
       organizationId: verification.payload.organizationId,
+      plantScope: verification.payload.plantScope,
       permissions: verification.payload.permissions || [],
     });
 
@@ -384,7 +388,7 @@ export function requireErpAuth(options: RequireErpAuthOptions = {}) {
       if (!decision.allowed) {
         return res.status(403).json({
           error: decision.reason || `The caller does not have permission '${options.requiredPermission}'.`,
-          code: decision.code || 'FORBIDDEN_PERMISSION',
+          code: 'FORBIDDEN_PERMISSION',
           authorized: false,
         });
       }
@@ -396,7 +400,7 @@ export function requireErpAuth(options: RequireErpAuthOptions = {}) {
       if (!decision.allowed) {
         return res.status(403).json({
           error: decision.reason || `The caller lacks required permissions: ${options.requiredPermissions.join(', ')}`,
-          code: decision.code || 'FORBIDDEN_PERMISSION',
+          code: 'FORBIDDEN_PERMISSION',
           authorized: false,
         });
       }

@@ -164,7 +164,7 @@ test('Authorization: authenticated user without required permission is rejected'
   const result = authorizeRequest(req, ['Operator'], 'QUALITY_APPROVE');
   assert.equal(result.authorized, false);
   assert.equal(result.code, 'FORBIDDEN_PERMISSION');
-  assert.match(result.reason || '', /does not have permission/i);
+  assert.match(result.reason || '', /does not (have|hold) permission/i);
 });
 
 test('Express Middleware: requireErpAuth rejects missing token with 401', () => {

@@ -7,7 +7,10 @@ import {
   Factory,
   PanelLeftClose,
   PanelLeftOpen,
+  LogOut,
+  UserCheck,
 } from 'lucide-react';
+import { useAuth } from '../../modules/security';
 
 interface TopbarProps {
   currentModuleTitle: string;
@@ -42,6 +45,16 @@ export const Topbar: React.FC<TopbarProps> = ({
   onOpenWorkflow,
   pendingApprovalsCount = 0,
 }) => {
+  let user: any = null;
+  let logout = () => {};
+  try {
+    const auth = useAuth();
+    user = auth.user;
+    logout = auth.logout;
+  } catch {
+    // Fallback if rendered outside AuthProvider
+  }
+
   return (
     <header className="h-14 border-b border-slate-200 bg-white sticky top-0 z-20 px-3 sm:px-6 flex items-center justify-between gap-3 sm:gap-6 shrink-0 w-full">
       {/* Zone 1: Hamburger Menu (Mobile/Tablet) + Brand & Breadcrumb */}
@@ -172,6 +185,28 @@ export const Topbar: React.FC<TopbarProps> = ({
           <BookOpen className="w-3.5 h-3.5 text-blue-400 shrink-0" />
           <span className="hidden sm:inline">Alur Proses ERP</span>
         </button>
+
+        {/* Authenticated User Session Badge & Logout */}
+        {user && (
+          <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
+            <div className="hidden lg:flex flex-col text-right">
+              <span className="text-xs font-semibold text-slate-900 leading-tight">
+                {user.fullName}
+              </span>
+              <span className="text-[10px] text-blue-600 font-mono font-medium leading-tight">
+                {user.roles?.join(', ') || user.role}
+              </span>
+            </div>
+            <button
+              onClick={() => logout()}
+              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
+              title={`Sign Out (${user.username || user.userId})`}
+              aria-label="Sign Out"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );

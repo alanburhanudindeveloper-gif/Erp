@@ -19,7 +19,7 @@ export interface AuthorizationDecision {
   readonly code:
     | 'GRANTED'
     | 'DENIED_UNAUTHENTICATED'
-    | 'FORBIDDEN_PERMISSION'
+    | 'DENIED_NO_PERMISSION'
     | 'DENIED_SCOPE_MISMATCH'
     | 'DENIED_UNKNOWN_PERMISSION';
   readonly reason?: string;
@@ -121,8 +121,8 @@ export class AuthorizationEngine implements IAuthorizationEngine {
     if (!hasPermission) {
       const decision: AuthorizationDecision = {
         allowed: false,
-        code: 'FORBIDDEN_PERMISSION',
-        reason: `User '${user.userId}' with roles [${userRoles.join(', ')}] does not hold permission '${cleanPermission}'.`,
+        code: 'DENIED_NO_PERMISSION',
+        reason: `User '${user.userId}' with roles [${userRoles.join(', ')}] is not allowed: does not hold permission '${cleanPermission}'. Access denied.`,
         permission: cleanPermission,
         evaluatedRoles: userRoles,
         scopeContext: context,
@@ -239,7 +239,7 @@ export class AuthorizationEngine implements IAuthorizationEngine {
     return (
       lastDecision || {
         allowed: false,
-        code: 'FORBIDDEN_PERMISSION',
+        code: 'DENIED_NO_PERMISSION',
         reason: 'None of the requested permissions were granted.',
         permission: permissions.join(' | '),
         evaluatedRoles: user?.roles || [],

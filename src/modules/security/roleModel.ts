@@ -158,7 +158,9 @@ export class RoleRegistry {
       permissions: [
         'quality.inspection.read',
         'quality.inspection.evaluate',
+        'quality.inspection.release',
         'quality.ncr.read',
+        'quality.ncr.resolve',
         'manufacturing.order.read',
         'inventory.stock.read',
         'inventory.stock.transfer',

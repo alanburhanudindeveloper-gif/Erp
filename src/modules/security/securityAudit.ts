@@ -24,9 +24,23 @@ export interface SecurityAuditEntry {
   readonly scopeContext?: SecurityScopeContext;
 }
 
+export interface AuthAuditEntry {
+  readonly id: string;
+  readonly timestamp: string;
+  readonly eventType: 'LOGIN_SUCCESS' | 'LOGIN_FAILURE' | 'LOGOUT' | 'AUTH_REJECTED';
+  readonly identifier?: string;
+  readonly userId?: string;
+  readonly roles?: string[];
+  readonly organizationId?: string;
+  readonly reason?: string;
+  readonly ipAddress?: string;
+}
+
 export interface ISecurityAuditLogger {
   logDecision(entry: Omit<SecurityAuditEntry, 'id' | 'timestamp'>): void;
   getRecentAudits(limit?: number): SecurityAuditEntry[];
+  logAuthEvent(entry: Omit<AuthAuditEntry, 'id' | 'timestamp'>): void;
+  getRecentAuthEvents(limit?: number): AuthAuditEntry[];
   clear(): void;
 }
 
@@ -36,6 +50,7 @@ export interface ISecurityAuditLogger {
  */
 export class InMemorySecurityAuditLogger implements ISecurityAuditLogger {
   private readonly buffer: SecurityAuditEntry[] = [];
+  private readonly authBuffer: AuthAuditEntry[] = [];
   private readonly maxEntries: number;
 
   constructor(maxEntries = 500) {
@@ -59,8 +74,26 @@ export class InMemorySecurityAuditLogger implements ISecurityAuditLogger {
     return this.buffer.slice(0, limit);
   }
 
+  logAuthEvent(entry: Omit<AuthAuditEntry, 'id' | 'timestamp'>): void {
+    const record: AuthAuditEntry = {
+      ...entry,
+      id: `auth-aud-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      timestamp: new Date().toISOString(),
+    };
+
+    this.authBuffer.unshift(record);
+    if (this.authBuffer.length > this.maxEntries) {
+      this.authBuffer.pop();
+    }
+  }
+
+  getRecentAuthEvents(limit = 50): AuthAuditEntry[] {
+    return this.authBuffer.slice(0, limit);
+  }
+
   clear(): void {
     this.buffer.length = 0;
+    this.authBuffer.length = 0;
   }
 }
 

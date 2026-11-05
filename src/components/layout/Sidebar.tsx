@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useDynamicMenu } from '../../modules/navigation/useDynamicMenu';
 import {
   LayoutDashboard,
   Database,
@@ -298,6 +299,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isMobileOpen,
   onCloseMobile,
 }) => {
+  const { filterNavGroups } = useDynamicMenu();
+  const dynamicNavGroups = filterNavGroups(NAV_GROUPS);
+
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     manufacturing: true,
     workflow: true,
@@ -390,7 +394,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Navigation Groups */}
         <div className="flex-1 overflow-y-auto py-3 px-2 space-y-4">
-          {NAV_GROUPS.map((group) => (
+          {dynamicNavGroups.map((group) => (
             <div key={group.id} className="space-y-1">
               {!isCollapsed && (
                 <div className="px-3 pt-1 pb-1 text-[10px] font-bold tracking-wider text-slate-500 uppercase font-mono">

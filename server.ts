@@ -31,6 +31,12 @@ import { erpRouter } from './src/infrastructure/api/erpRouter.ts';
 // Authoritative ERP CQRS & Repository Routes
 app.use('/api/erp', erpRouter);
 
+// Direct /api/auth route alias
+app.use('/api/auth', (req, res, next) => {
+  req.url = '/auth' + (req.url === '/' ? '' : req.url);
+  erpRouter(req, res, next);
+});
+
 app.get('/api/erp/health', (_req, res) => {
   res.json({
     ok: true,
